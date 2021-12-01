@@ -18,9 +18,10 @@ namespace usd
      *      - https://github.com/googleprojectzero/symboliclink-testing-tools)
      *
      * We used James's implementation as a reference for the usd.Symlink type. Furthermore,
-     * the C# code for created the junctions were mostly copied from this resource:
+     * the C# code for created the junctions were mostly copied from these resources:
      *
      *      - https://gist.github.com/LGM-AdrianHum/260bc9ab3c4cd49bc8617a2abe84ca74
+     *      - https://coderedirect.com/questions/136750/check-if-a-file-is-real-or-a-symbolic-link
      *  
      * The type is intended to be used from PowerShell:
      *
@@ -100,12 +101,22 @@ namespace usd
             this.target = target;
 
             foreach (DosDevice device in dosDevices)
-                device.setTarget(target);
+                device.SetTarget(target);
         }
 
         public string GetTarget()
         {
             return this.target;
+        }
+
+        public Junction[] GetJunctions()
+        {
+            return junctions.ToArray<Junction>();
+        }
+
+        public DosDevice[] GetDosDevices()
+        {
+            return dosDevices.ToArray<DosDevice>();
         }
 
         public void SetLink(string link)
@@ -133,11 +144,11 @@ namespace usd
 
             Console.WriteLine("[+] Junctions:");
             foreach (Junction junction in this.junctions)
-                Console.WriteLine("[+]\t" + junction.getBaseDir() + " -> " + junction.getTargetDir());
+                Console.WriteLine("[+]\t" + junction.GetBaseDir() + " -> " + junction.GetTargetDir());
 
             Console.WriteLine("[+] DosDevices:");
             foreach (DosDevice device in this.dosDevices)
-                Console.WriteLine("[+]\t" + device.getName() + " -> " + device.getTargetName());
+                Console.WriteLine("[+]\t" + device.GetName() + " -> " + device.GetTargetName());
         }
 
         public void Open()
@@ -165,7 +176,7 @@ namespace usd
             Console.WriteLine("[+] Symlink(s) deleted.");
         }
 
-        public static Symlink fromFile(string path)
+        public static Symlink FromFile(string path)
         {
             if (!File.Exists(path))
                 throw new IOException("Unable to find file: " + path);
@@ -176,7 +187,7 @@ namespace usd
             return sym;
         }
 
-        public static Symlink fromFolder(string src)
+        public static Symlink FromFolder(string src)
         {
             if (!Directory.Exists(src))
                 throw new IOException("Unable to find directory: " + src);
@@ -198,7 +209,7 @@ namespace usd
             return sym;
         }
 
-        public static Symlink[] fromFolderToFolder(string src, string dst)
+        public static Symlink[] FromFolderToFolder(string src, string dst)
         {
             if (!Directory.Exists(src))
                 throw new IOException("Unable to find directory: " + src);
@@ -265,23 +276,23 @@ namespace usd
             this.targetName = target;
         }
 
-        public void setOpen()
+        public void SetOpen()
         {
             this.open = true;
         }
 
-        public void setTarget(string name)
+        public void SetTarget(string name)
         {
             this.target = @"\??\" + name;
             this.targetName = name;
         }
 
-        public string getTargetName()
+        public string GetTargetName()
         {
             return targetName;
         }
 
-        public string getName()
+        public string GetName()
         {
             return name;
         }
@@ -341,14 +352,17 @@ namespace usd
         public static extern IntPtr CreateFile(string filename, FileAccess access, FileShare share, IntPtr securityAttributes, FileMode fileMode, uint flagsAndAttributes, IntPtr templateFile);
 
         [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true, CharSet = CharSet.Auto)]
-        static extern bool DeviceIoControl(IntPtr hDevice, uint dwIoControlCode, IntPtr lpInBuffer, uint nInBufferSize, IntPtr lpOutBuffer, uint nOutBufferSize, out uint lpBytesReturned, IntPtr lpOverlapped);
+        static extern bool DeviceIoControl(IntPtr hDevice, uint dwIoControlCode, IntPtr lpInBuffer, int nInBufferSize, IntPtr lpOutBuffer, int nOutBufferSize, out int lpBytesReturned, IntPtr lpOverlapped);
 
         private bool open;
         private bool created;
         private string baseDir;
         private string targetDir;
 
+        private const int ERROR_NOT_A_REPARSE_POINT = 4390;
+
         private const int FSCTL_SET_REPARSE_POINT = 0x000900A4;
+        private const int FSCTL_GET_REPARSE_POINT = 0x000900A8;
         private const int FSCTL_DELETE_REPARSE_POINT = 0x000900AC;
         private const uint IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003;
 
@@ -366,27 +380,27 @@ namespace usd
             this.created = false;
         }
 
-        public void setOpen()
+        public void SetOpen()
         {
             this.open = true;
         }
 
-        public string getBaseDir()
+        public string GetBaseDir()
         {
             return baseDir;
         }
 
-        public string getTargetDir()
+        public string GetTargetDir()
         {
             return targetDir;
         }
 
-        public void setBaseDir(string baseDir)
+        public void SetBaseDir(string baseDir)
         {
             this.baseDir = baseDir;
         }
 
-        public void setTargetDir(string targetDir)
+        public void SetTargetDir(string targetDir)
         {
             this.targetDir = targetDir;
         }
@@ -404,11 +418,17 @@ namespace usd
             else
             {
                 this.created = false;
+                string target = this.GetTarget();
+
+                if( target != null && target == @"\RPC CONTROL" )
+                {
+                    Console.WriteLine("[+] Junction " + baseDir + " -> \\RPC Control does already exist.");
+                    return;
+                }
             }
 
             if (Directory.EnumerateFileSystemEntries(baseDir).Any())
             {
-
                 Console.Write("[-] Junction directory " + baseDir + " isn't empty. Delete files? (y/N) ");
                 ConsoleKey response = Console.ReadKey(false).Key;
                 Console.WriteLine();
@@ -451,9 +471,9 @@ namespace usd
                 {
                     Marshal.StructureToPtr(reparseDataBuffer, inBuffer, false);
 
-                    uint bytesReturned;
+                    int bytesReturned;
                     var result = DeviceIoControl(safeHandle.DangerousGetHandle(), FSCTL_SET_REPARSE_POINT,
-                        inBuffer, (uint)targetDirBytes.Length + 20, IntPtr.Zero, 0, out bytesReturned, IntPtr.Zero);
+                        inBuffer, targetDirBytes.Length + 20, IntPtr.Zero, 0, out bytesReturned, IntPtr.Zero);
 
                     if (!result)
                         throw new IOException("Unable to create Junction!", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
@@ -496,7 +516,7 @@ namespace usd
                 {
                     Marshal.StructureToPtr(reparseDataBuffer, inBuffer, false);
 
-                    uint bytesReturned;
+                    int bytesReturned;
                     var result = DeviceIoControl(safeHandle.DangerousGetHandle(), FSCTL_DELETE_REPARSE_POINT,
                         inBuffer, 8, IntPtr.Zero, 0, out bytesReturned, IntPtr.Zero);
 
@@ -513,6 +533,60 @@ namespace usd
 
             if (!this.open && this.created)
                 Directory.Delete(baseDir);
+        }
+
+        public string GetTarget()
+        {
+            if (!Directory.Exists(this.baseDir))
+                return null;
+
+            REPARSE_DATA_BUFFER reparseDataBuffer;
+
+            using (SafeFileHandle fileHandle = this.OpenReparsePoint())
+            {
+                if (fileHandle.IsInvalid)
+                {
+                    Marshal.ThrowExceptionForHR(Marshal.GetHRForLastWin32Error());
+                }
+
+                var outBufferSize = Marshal.SizeOf(typeof(REPARSE_DATA_BUFFER));
+                var outBuffer = IntPtr.Zero;
+
+                try
+                {
+                    outBuffer = Marshal.AllocHGlobal(outBufferSize);
+                    int bytesReturned;
+                    bool success = DeviceIoControl(fileHandle.DangerousGetHandle(), FSCTL_GET_REPARSE_POINT, IntPtr.Zero, 0,
+                        outBuffer, outBufferSize, out bytesReturned, IntPtr.Zero);
+
+                    fileHandle.Close();
+
+                    if (!success)
+                    {
+                        if (((uint)Marshal.GetHRForLastWin32Error()) == ERROR_NOT_A_REPARSE_POINT)
+                        {
+                            return null;
+                        }
+                        Marshal.ThrowExceptionForHR(Marshal.GetHRForLastWin32Error());
+                    }
+
+                    reparseDataBuffer = (REPARSE_DATA_BUFFER)Marshal.PtrToStructure(outBuffer, typeof(REPARSE_DATA_BUFFER));
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(outBuffer);
+                }
+            }
+
+            if (reparseDataBuffer.ReparseTag != IO_REPARSE_TAG_MOUNT_POINT)
+            {
+                return null;
+            }
+
+            string target = Encoding.Unicode.GetString(reparseDataBuffer.MountPointBuffer.PathBuffer,
+                reparseDataBuffer.MountPointBuffer.SubstituteNameOffset, reparseDataBuffer.MountPointBuffer.SubstituteNameLength);
+
+            return target;
         }
 
         private SafeFileHandle OpenReparsePoint()
