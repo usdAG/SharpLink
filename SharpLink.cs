@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 
 namespace usd
@@ -11,7 +12,7 @@ namespace usd
     /**
      * Introduces the usd.Symlink type that can be used to create 'file system symbolic links'
      * from a low privileged user account. The created links are not real filesystem symbolic
-     * links, but the combination of a junction with an object manager symbolic link in the 
+     * links, but the combination of a junction with an object manager symbolic link in the
      * '\RPC Control' object directory. This technique was publicized by James Forshaw and
      * implemented within his symboliclink-testing-tools:
      *
@@ -22,7 +23,7 @@ namespace usd
      *
      *      - https://gist.github.com/LGM-AdrianHum/260bc9ab3c4cd49bc8617a2abe84ca74
      *      - https://coderedirect.com/questions/136750/check-if-a-file-is-real-or-a-symbolic-link
-     *  
+     *
      * The type is intended to be used from PowerShell:
      *
      *      PS C:\> $type = @"
@@ -66,6 +67,72 @@ namespace usd
         [FieldOffset(4)] public ushort ReparseDataLength;
         [FieldOffset(6)] public ushort Reserved;
         [FieldOffset(8)] public MOUNT_POINT_REPARSE_BUFFER MountPointBuffer;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct OBJECT_ATTRIBUTES : IDisposable
+    {
+        public int Length;
+        public IntPtr RootDirectory;
+        private IntPtr objectName;
+        public uint Attributes;
+        public IntPtr SecurityDescriptor;
+        public IntPtr SecurityQualityOfService;
+
+        public OBJECT_ATTRIBUTES(string name, uint attrs)
+        {
+            Length = 0;
+            RootDirectory = IntPtr.Zero;
+            objectName = IntPtr.Zero;
+            Attributes = attrs;
+            SecurityDescriptor = IntPtr.Zero;
+            SecurityQualityOfService = IntPtr.Zero;
+
+            Length = Marshal.SizeOf(this);
+            ObjectName = new UNICODE_STRING(name);
+        }
+
+        public UNICODE_STRING ObjectName
+        {
+            get
+            {
+                return (UNICODE_STRING)Marshal.PtrToStructure(
+                 objectName, typeof(UNICODE_STRING));
+            }
+
+            set
+            {
+                bool fDeleteOld = objectName != IntPtr.Zero;
+                if (!fDeleteOld)
+                    objectName = Marshal.AllocHGlobal(Marshal.SizeOf(value));
+                Marshal.StructureToPtr(value, objectName, fDeleteOld);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (objectName != IntPtr.Zero)
+            {
+                Marshal.DestroyStructure(objectName, typeof(UNICODE_STRING));
+                Marshal.FreeHGlobal(objectName);
+                objectName = IntPtr.Zero;
+            }
+        }
+    }
+
+    public struct UNICODE_STRING
+    {
+        public ushort Length;
+        public ushort MaximumLength;
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string Buffer;
+
+        public UNICODE_STRING(string str)
+        {
+            Length = (ushort)(str.Length * 2);
+            MaximumLength = (ushort)((str.Length * 2) + 1);
+            Buffer = str;
+        }
     }
 
     public class Symlink
@@ -612,6 +679,167 @@ namespace usd
         public bool Equals(Junction other)
         {
             return (baseDir == other.baseDir) && (targetDir == other.targetDir);
+        }
+    }
+
+
+    public class RegistryLink
+    {
+        [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
+        static extern int NtCreateKey(out IntPtr KeyHandle, uint DesiredAccess, [In] OBJECT_ATTRIBUTES ObjectAttributes, int TitleIndex, [In] string Class, int CreateOptions, out int Disposition);
+
+        [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
+        static extern int NtSetValueKey(SafeRegistryHandle KeyHandle, UNICODE_STRING ValueName, int TitleIndex, int Type, byte[] Data, int DataSize);
+
+        [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
+        static extern int NtDeleteKey(SafeRegistryHandle KeyHandle);
+
+        private const uint ATTRIBUT_FLAG_CASE_INSENSITIVE = 0x00000040;
+        private const uint KEY_ALL_ACCESS = 0x02000000;
+        private const int INTERNAL_REG_OPTION_CREATE_LINK = 0x00000002;
+        private const int INTERNAL_REG_OPTION_OPEN_LINK = 0x00000100;
+        private const int KEY_TYPE_LINK = 0x0000006;
+
+        private bool keepOpen;
+        private String target;
+        private HashSet<string> links;
+        private List<SafeRegistryHandle> handles;
+        private Dictionary<SafeRegistryHandle, string> linkMapping;
+
+        public RegistryLink()
+        {
+            this.target = "";
+            this.keepOpen = false;
+            this.links = new HashSet<string>();
+            this.handles = new List<SafeRegistryHandle>();
+            this.linkMapping = new Dictionary<SafeRegistryHandle, string>();
+        }
+
+        ~RegistryLink()
+        {
+            if (keepOpen)
+                return;
+
+            this.Close();
+        }
+
+        public void keepAlive()
+        {
+            this.keepOpen = true;
+        }
+
+        public void SetTarget(string target)
+        {
+            this.target = RegistryLink.RegPathToNative(target);
+        }
+
+        public string GetTarget()
+        {
+            return this.target;
+        }
+
+        public string[] GetJunctions()
+        {
+            return links.ToArray<String>();
+        }
+
+        public void SetLink(string link)
+        {
+            links.Clear();
+            this.AddLink(link);
+        }
+
+        public void AddLink(string link)
+        {
+            this.links.Add(RegistryLink.RegPathToNative(link));
+        }
+
+        private int GetVolatile()
+        {
+            if (this.keepOpen)
+                return 0;
+
+            return 1;
+        }
+
+        public void Open()
+        {
+            if (target == "")
+                throw new IOException("SetTarget needs to be called first.");
+
+            foreach(string link in links)
+                Open(link, target);
+        }
+
+        public void Open(string from, string to)
+        {
+            Console.WriteLine("Creating registry link from " + from + " to " + to);
+
+            SafeRegistryHandle handle = OpenKey(from);
+            handles.Add(handle);
+            linkMapping.Add(handle, from);
+
+            UNICODE_STRING value_name = new UNICODE_STRING("SymbolicLinkValue");
+            byte[] data = Encoding.Unicode.GetBytes(to);
+
+            int status = NtSetValueKey(handle, value_name, 0, KEY_TYPE_LINK, data, data.Length);
+
+            if (status != 0)
+            {
+                throw new IOException("Failure while linking " + from + " to " + to);
+            }
+
+            Console.WriteLine("Symlink setup successful!");
+        }
+
+        public void Close()
+        {
+            foreach (SafeRegistryHandle handle in handles)
+            {
+                Console.WriteLine("Deleting symlink " + linkMapping[handle]);
+                NtDeleteKey(handle);
+            }
+        }
+
+        public SafeRegistryHandle OpenKey(string path)
+        {
+            OBJECT_ATTRIBUTES obj_attr = new OBJECT_ATTRIBUTES(path, ATTRIBUT_FLAG_CASE_INSENSITIVE);
+            int disposition = 0;
+
+            IntPtr handle;
+            int status = NtCreateKey(out handle, KEY_ALL_ACCESS, obj_attr, 0, null, INTERNAL_REG_OPTION_CREATE_LINK | this.GetVolatile(), out disposition);
+
+            if(status == 0)
+                return new SafeRegistryHandle(handle, true);
+
+            throw new IOException("Failure while creating registry key " + path);
+        }
+
+        public static string RegPathToNative(string path)
+        {
+            string regpath = @"\Registry\";
+
+            if (path[0] == '\\')
+            {
+                return path;
+            }
+
+            if (path.StartsWith(@"HKLM\"))
+            {
+                return regpath + @"Machine\" + path.Substring(5);
+            }
+
+            else if (path.StartsWith(@"HKU\"))
+            {
+                return regpath + @"User\" + path.Substring(4);
+            }
+
+            else if (path.StartsWith(@"HKCU\"))
+            {
+                return regpath + @"User\" + WindowsIdentity.GetCurrent().User.ToString() + @"\" + path.Substring(5);
+            }
+
+            throw new IOException("Registry path must be absolute or start with HKLM, HKU or HKCU");
         }
     }
 }
