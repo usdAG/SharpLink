@@ -14,7 +14,7 @@ namespace de.usd.SharpLink
      * file system and registry symbolic links.
      *
      * File system symbolic links created by functions from this namespace are pseudo-links
-     * that consist out of the combination of a junction with an object manager symbolic link
+     * that consist out of the combination of a Junction with an object manager symbolic link
      * in the '\RPC Control' object directory. This technique was publicized by James Forshaw
      * and implemented within his symboliclink-testing-tools:
      *
@@ -27,8 +27,8 @@ namespace de.usd.SharpLink
      *      - https://coderedirect.com/questions/136750/check-if-a-file-is-real-or-a-symbolic-link
      *
      * Also the implementation of registry symbolic links is very close to the one within the
-     * symboliclink-testing-tools and all credits go to James again. Furthermore, the following
-     * resource was used as a refernece:
+     * symboliclink-testing-tools and credits go to James again. Furthermore, the following
+     * resource was used as a reference:
      *
      *      - https://bugs.chromium.org/p/project-zero/issues/detail?id=872
      *
@@ -130,154 +130,299 @@ namespace de.usd.SharpLink
         }
     }
 
+    public interface ILink
+    {
+        void Open();
+        void Close();
+        void ForceClose();
+        void PrintStatus();
+        void KeepAlive(bool value);
+    }
+
     /**
-     * The Symlink class is used for creating file system symbolic links. In the easiest case,
-     * an instance of Symlink is coupled to one symbolic link on the file system. However, this
-     * does not need to be the case and an instance of Symlink may contain multiple links that
-     * point to the same target.
+     * A LinkGroup represents a collection of symbolic links and can be used to perform compound
+     * operations on them. This is useful when you have multiple links that you want to Open or
+     * Close at the same time. The group can store all kind of links that implement the ILink
+     * interface.
      *
      * Author: Tobias Neitzel (@qtc_de)
      */
-    public class Symlink
+    public class LinkGroup
     {
-        // whether to keep the symbolic link alive when the Symlink instance is cleaned up
-        private bool keepOpen;
-
-        // the shared target of all symbolic links contained within this container
-        private String target;
-
-        // all Junctions opened by this container
-        private HashSet<Junction> junctions;
-
-        // all DosDevices opened to this contained
-        private HashSet<DosDevice> dosDevices;
+        // Links stored within the LinkGroup
+        private HashSet<ILink> links;
 
         /**
-         * Instances of Symlink should be created without any arguments. Required information
-         * should be added later on the existing object.
+         * On instantiation, a LinkGroup obtains a fresh HashSet to store it's links in.
          */
-        public Symlink()
+        public LinkGroup()
         {
-            this.target = "";
-            this.keepOpen = false;
-            this.junctions = new HashSet<Junction>();
-            this.dosDevices = new HashSet<DosDevice>();
+            links = new HashSet<ILink>();
         }
 
         /**
-         * If keepOpen is not set to true, all remaining symbolic links opened by this container
-         * are closed.
-         */
-        ~Symlink()
-        {
-            if (keepOpen)
-                return;
-
-            this.Close();
-        }
-
-        /**
-         * Tell the instance to keep it's symoblic links alive.
-         */
-        public void keepAlive()
-        {
-            this.keepOpen = true;
-        }
-
-        /**
-         * Set the target used by all symbolic links contained in this container. The specified
-         * target is set for all alreday added symbolic links and for all links that are added in
-         * future.
+         * Adds an already existing Link to the group.
          *
-         * @param target file system path to the target that is shared among all links in this container
+         * @param link  already existing Link to add
          */
-        public void SetTarget(string target)
+        public void AddLink(ILink link)
         {
-            this.target = target;
-
-            foreach (DosDevice device in dosDevices)
-                device.SetTarget(target);
+            links.Add(link);
         }
 
         /**
-         * Return the currently configured target.
-         * 
-         * @return file system path of the target
-         */
-        public string GetTarget()
-        {
-            return this.target;
-        }
-
-        /**
-         * Return all Junction objects assigned to this container.
-         * 
-         * @return Junctions associated to the Symlink container
-         */
-        public Junction[] GetJunctions()
-        {
-            return junctions.ToArray<Junction>();
-        }
-
-        /**
-         * Return all DosDevice objects assigned to this container.
-         * 
-         * @return DosDevices associated to the Symlink container
-         */
-        public DosDevice[] GetDosDevices()
-        {
-            return dosDevices.ToArray<DosDevice>();
-        }
-
-        /**
-         * Removes all previously added Junctions and DosDevices and replaces them with
-         * a Junction and a DosDevice for the specified link. Junctions and DosDevices are not
-         * closed during this action.
+         * Create a new Symlink from the specified path to the specified target and assign
+         * it to the LinkGroup.
          *
-         * @param link file system path for the new symbolic link
+         * @param path  path the symlink should be created from
+         * @param target  target the symlink should be pointing to
          */
-        public void SetLink(string link)
+        public void AddLink(string path, string target)
         {
-            junctions.Clear();
-            dosDevices.Clear();
-            this.AddLink(link);
+            AddLink(path, target, false);
         }
 
         /**
-         * Add a new symbolic link to the container. This creates the requied Junction and
-         * DosDevice, but does not open the link already.
+         * Create a new Symlink from the specified path to the specified target and assign
+         * it to the LinkGroup. This version of the function allows to set the keepAlive
+         * property of the link.
          *
-         * @param link file system path for the new symbolic link
+         * @param path  path the symlink should be created from
+         * @param target  target the symlink should be pointing to
+         * @param keepAlive  whether to keep the symlink alive after the object is cleaned up
          */
-        public void AddLink(string link)
+        public void AddLink(string path, string target, bool keepAlive)
         {
-            String linkFile = Path.GetFileName(link);
-            String linkDir = Path.GetDirectoryName(link);
-
-            if (String.IsNullOrEmpty(linkDir))
-                throw new IOException("Link names are required to contain at least one directory (e.g. example\\link)");
-
-            junctions.Add(new Junction(linkDir));
-            dosDevices.Add(new DosDevice(linkFile, target));
+            links.Add(new Symlink(path, target, keepAlive));
         }
 
         /**
-         * Show some status information on the container. This prints the target name, all the configured
-         * Junctions and the configured DosDevices.
+         * Create a new RegistryLink from the specified key to the specified target key and assign
+         * it to the LinkGroup.
+         *
+         * @param key  key the RegistryLink should be created from
+         * @param target  target the RegistryLink should be pointing to
          */
-        public void GetDetails()
+        public void AddRegistryLink(string path, string target)
         {
-            Console.WriteLine("[+] Target: {0}", target);
+            AddRegistryLink(path, target, false);
+        }
 
-            Console.WriteLine("[+] Junctions:");
+        /**
+         * Create a new RegistryLink from the specified key to the specified target key and assign
+         * it to the LinkGroup. This version of the function allows to set the keepAlive
+         * property of the RegistryLink.
+         *
+         * @param key  key the RegistryLink should be created from
+         * @param target  target the RegistryLink should be pointing to
+         * @param keepAlive  whether to keep the symlink alive after the object is cleaned up
+         */
+        public void AddRegistryLink(string key, string target, bool keepAlive)
+        {
+            links.Add(new RegistryLink(key, target, keepAlive));
+        }
 
-            foreach (Junction junction in this.junctions)
-                Console.WriteLine("[+]\t {0} -> {1}", junction.GetBaseDir(), junction.GetTargetDir());
+        /**
+         * Tells all contained Links that they should stay alive, even after the object
+         * was cleaned up.
+         */
+        public void KeepAlive()
+        {
+            KeepAlive(true);
+        }
 
-            Console.WriteLine("[+] DosDevices:");
+        /**
+         * Tells all contained Links whether they should stay alive, even after the object
+         * was cleaned up.
+         *
+         * @param value  wether or not the Symlinks should stay alive
+         */
+        public void KeepAlive(bool value)
+        {
+            foreach (ILink link in links)
+                link.KeepAlive(value);
+        }
 
-            foreach (DosDevice device in this.dosDevices)
-                Console.WriteLine("[+]\t {0} -> {1}", device.GetName(), device.GetTargetName());
+        /**
+         * Open all Links contained within this group.
+         */
+        public void Open()
+        {
+            foreach (ILink link in links)
+                link.Open();
+        }
+
+        /**
+         * Close all Links contained within this group.
+         */
+        public void Close()
+        {
+            foreach (ILink link in links)
+                link.Close();
+        }
+
+        /**
+         * Enforce the Close operation for all Links contained within this group.
+         */
+        public void ForceClose()
+        {
+            foreach (ILink link in links)
+                link.ForceClose();
+        }
+
+        /**
+         * Remove all Links stored in this group. Depending on their keepAlive
+         * setting, the Links are only removed from the group, but not closed.
+         */
+        public void Clear()
+        {
+            links.Clear();
+        }
+
+        /**
+         * Return the Links stored in this group as an array.
+         *
+         * @return ILink array of the contained Links
+         */
+        public ILink[] GetLinks()
+        {
+            return links.ToArray<ILink>();
+        }
+
+        /**
+         * Print some status information on the current group. This includes the number of
+         * contained Links and the detailes of them.
+         */
+        public void PrintStatus()
+        {
+            Console.WriteLine("[+] LinkGroup contains {0} symbolic links", links.Count);
+
+            foreach (ILink link in links)
+            {
+                Console.WriteLine("[+]");
+                link.PrintStatus();
+            }
+        }
+    }
+
+    /**
+     * An instance of  Symlink represents a single file system symbolic link. Each Symlink contains
+     * the path the Symlink should be cretaed in and the target it should be pointing to. Creating
+     * the Symlink object does not open it already on the file system. The Open function needs to
+     * be called to achieve this. Symlinks are removed when the corresponding Symlink object goes
+     * out of scope. This default behavior can be modified by using the keepAlive function.
+     *
+     * When opening a Symlink, it attempts to create one Junction and one DosDevice that are needed to
+     * setup the Symlink on the file system. Before doing so, it checks whether an approtiate Junction
+     * or DosDevice already exists. Only if not existing, the objects are created. After creation, the
+     * objects are associated to Symlink object. The Symlink is then the owner of these objects and
+     * responsible for maintaining their lifetime. If the objects already existed, the Symlink does not
+     * take ownership of them.
+     *
+     * Author: Tobias Neitzel (@qtc_de)
+     */
+    public class Symlink : ILink
+    {
+        // file system path the symlink is created in
+        private string path;
+
+        // file system path the symlink should point to
+        private string target;
+
+        // associated Junction object (assigned when opening the link - may be null)
+        private Junction junction;
+
+        // associated DosDevice object (assigned when opening the link - may be null)
+        private DosDevice dosDevice;
+
+        // whether to keep the associated Junction and DosDevice alive after the object is removed
+        private bool keepAlive;
+
+        /**
+         * Symlinks are created by specifying the location they should be created in and the location
+         * they should point to.
+         *
+         * @param path  file system path the link is created in
+         * @param target  file system path the link is pointing to
+         */
+        public Symlink(string path, string target) : this(path, target, false) { }
+
+        /**
+         * Symlinks are created by specifying the location they should be created in and the location
+         * they should point to. Additionally, this constructor allows specifying the keepAlive value
+         * of the link, which determines whether the physical link should be kept alive after the
+         * object is gone.
+         *
+         * @param path  file system path the link is created in
+         * @param target  file system path the link is pointing to
+         * @param keepAlive  whether to keep the physical link alive after object cleanup
+         */
+        public Symlink(string path, string target, bool keepAlive)
+        {
+            this.path = Path.GetFullPath(path);
+            this.target = Path.GetFullPath(target);
+
+            this.junction = null;
+            this.dosDevice = null;
+            this.keepAlive = keepAlive;
+        }
+
+        /**
+         * Set the keepAlive property to true and tell already existing Junction and DosDevice objects
+         * to stay alive after cleanup.
+         */
+        public void KeepAlive()
+        {
+            KeepAlive(true);
+        }
+
+        /**
+         * Set the keepAlive property and tell already existing Junction and DosDevice objects whether to
+         * stay alive after cleanup.
+         *
+         * @param value  whether to keep the physical link alive after object cleanup
+         */
+        public void KeepAlive(bool value)
+        {
+            this.keepAlive = true;
+
+            if (junction != null)
+                junction.KeepAlive(value);
+
+            if (dosDevice != null)
+                dosDevice.KeepAlive(value);
+        }
+
+        /**
+         * Return the Junction object stored in this link. Links only have a Junction object set when they
+         * are open and a corresponding Junction does not already exist.
+         */
+        public Junction GetJunction()
+        {
+            return junction;
+        }
+
+        /**
+         * Return the DosDevice object stored in this link. Links only have a DosDevice object set when they
+         * are open and a corresponding DosDevice does not already exist.
+         */
+        public DosDevice GetDosDevice()
+        {
+            return dosDevice;
+        }
+
+        /**
+         * Print some status information on the link. This includes the link path and target path as well as
+         * the associated Junction and DosDevice.
+         */
+        public void PrintStatus()
+        {
+            Console.WriteLine("[+] Link type: File system link");
+            Console.WriteLine("[+] \tLink path: {0}", path);
+            Console.WriteLine("[+] \tTarget path: {0}", target);
+
+            Console.WriteLine("[+] \tAssociated Junction: {0}", (junction == null) ? "none" : junction.GetBaseDir());
+            Console.WriteLine("[+] \tAssociated DosDevice: {0}", (dosDevice == null) ? "none" : dosDevice.GetName());
         }
 
         /**
@@ -286,60 +431,111 @@ namespace de.usd.SharpLink
          */
         public void Open()
         {
-            if (String.IsNullOrEmpty(this.target))
-                throw new IOException("Link target is empty!");
+            if (junction != null && dosDevice != null)
+            {
+                Console.WriteLine("[-] Symlink was already opened. Call the Close function first if you want to reopen.");
+                return;
+            }
 
-            foreach (Junction junction in this.junctions)
-                junction.Open();
+            string linkFile = Path.GetFileName(path);
+            string linkDir = Path.GetDirectoryName(path);
 
-            foreach (DosDevice device in this.dosDevices)
-                device.Open();
+            if (String.IsNullOrEmpty(linkDir))
+            {
+                Console.WriteLine("Symlinks require at least one upper directory (e.g. example\\link)");
+                return;
+            }
+
+            if (junction == null)
+                junction = Junction.Create(linkDir, @"\RPC CONTROL", keepAlive);
+
+            if (dosDevice == null)
+                dosDevice = DosDevice.Create(linkFile, target, keepAlive);
 
             Console.WriteLine("[+] Symlink setup successfully.");
         }
 
         /**
-         * Closes all Junctions and DosDevices configured for this container. DosDevices and Junctions
-         * are only closed when they were created by the corresponding object.
+         * Closes all Junctions and DosDevices configured for this container. The corresponding object
+         * attributes are set to null afterwards, to distinguish the link from an open one.
          */
         public void Close()
         {
-            foreach (Junction junction in this.junctions)
+            if (junction != null)
                 junction.Close();
 
-            foreach (DosDevice device in this.dosDevices)
-                device.Close();
+            if (dosDevice != null)
+                dosDevice.Close();
 
-            Console.WriteLine("[+] Symlink(s) deleted.");
+            junction = null;
+            dosDevice = null;
+
+            Console.WriteLine("[+] Symlink deleted.");
         }
 
         /**
-         * Enforces a close operation on all contained Junctions and DosDevices. This skips the created
-         * check.
+         * Enforces the Close operation on all Junctions and DosDevices configured for this container.
+         * The corresponding object attributes are set to null afterwards, to distinguish the link
+         * from an open one.
          */
         public void ForceClose()
         {
-            foreach (Junction junction in this.junctions)
+            if (junction != null)
                 junction.ForceClose();
 
-            foreach (DosDevice device in this.dosDevices)
-                device.ForceClose();
+            if (dosDevice != null)
+                dosDevice.ForceClose();
 
-            Console.WriteLine("[+] Symlink(s) deleted.");
+            junction = null;
+            dosDevice = null;
+
+            Console.WriteLine("[+] Symlink deleted.");
         }
 
         /**
-         * Creates a Symlink object from a file. The specified path is basically turned
-         * into a symlink. This operation does not set a target for the link and the
-         * target needs to be set before or after this operation.
-         *
-         * @param path file system path that is replaced by the symlink
-         * @return Symlink object that replaces the file
+         * Symlink objects may be stored in LinkGroups, which store them internally in a HashSet. This
+         * requires the type to be hashable. This function builds a HashCode consisting out of the link
+         * path and the target.
          */
-        public static Symlink FromFile(string path)
+        public override int GetHashCode()
+        {
+            return (path + " -> " + target).GetHashCode();
+        }
+
+        /**
+         * Equals wrapper.
+         *
+         * @param obj object to compare with
+         */
+        public override bool Equals(object obj)
+        {
+            return Equals(obj as Symlink);
+        }
+
+        /**
+         * Two Symlinks are equal if their path and target are matching.
+         *
+         * @param other Symlink to compare with
+         */
+        public bool Equals(Symlink other)
+        {
+            return (path == other.path) && (target == other.target);
+        }
+
+        /**
+         * Create a Symlink from an existing file.
+         *
+         * @param path  file system path to the existing file
+         * @param target  symlink target
+         * @return Symlink with the requested properties
+         */
+        public static Symlink FromFile(string path, string target)
         {
             if (!File.Exists(path))
-                throw new IOException("Unable to find file: " + path);
+            {
+                Console.WriteLine("Unable to find file: {0}", path);
+                return null;
+            }
 
             Console.Write("Delete existing filer? (y/N) ");
             ConsoleKey response = Console.ReadKey(false).Key;
@@ -348,123 +544,89 @@ namespace de.usd.SharpLink
             if (response == ConsoleKey.Y)
                 File.Delete(path);
 
-            Symlink sym = new Symlink();
-            sym.SetLink(path);
-
-            return sym;
+            return new Symlink(path, target);
         }
 
         /**
-         * Creates a Symlink that contains one link for each file within a folder. Optionally
-         * deletes the files in the folder. This operation does not set a target for these links
-         * and the target needs to be set before or after this operation.
+         * Create a Symlink for each file existing in the specified folder. All created
+         * Symlinks share the same target and are bundeled within a LinkGroup.
          *
-         * @param src file system path to a folder to create links from
-         * @return Symlink object containing one link for each file
+         * @param src  file system path to the folder to create symlinks from
+         * @param target  shared target for all created symlinks
+         * @return LinkGroup containing the requested Symlinks
          */
-        public static Symlink FromFolder(string src)
+        public static LinkGroup FromFolder(string src, string target)
         {
             if (!Directory.Exists(src))
-                throw new IOException("Unable to find directory: " + src);
+            {
+                Console.WriteLine("Unable to find directory: {0}", src);
+                return null;
+            }
 
             Console.Write("Delete files in link folder? (y/N) ");
             ConsoleKey response = Console.ReadKey(false).Key;
             Console.WriteLine();
 
-            Symlink sym = new Symlink();
+            LinkGroup linkGroup = new LinkGroup();
 
             foreach (string filename in Directory.EnumerateFiles(src))
             {
                 if (response == ConsoleKey.Y)
                     File.Delete(filename);
 
-                sym.AddLink(filename);
+                linkGroup.AddLink(new Symlink(filename, target));
             }
 
-            return sym;
+            return linkGroup;
         }
 
         /**
-         * Whereas the FromFolder method creates one Symlink instance that contains multiple
-         * file system symbolic links poiting to the same target, this method creates multiple
-         * Symlink objects with each of them pointing to a different target.
+         * Create a Symlink for each file existing in the specified folder. The target
+         * for each created Symlink is a file with the same name as the link file within
+         * the specified target directory. The created Symlinks are bundeled into a
+         * LinkGroup.
          *
-         * For each file in the src folder, a symbolic link is created that points to a file with
-         * the same name in the destination folder. Files in the src folder are optionally deleted.
-         *
-         * @param src file system path to a folder to create links from
-         * @param dst file system path to a folder where the links point to
-         * @return array of Symlink objects
+         * @param src  file system path to the folder to create symlinks from
+         * @param dst  target directory where the symlinks are pointing to
+         * @return LinkGroup containing the requested Symlinks
          */
-        public static Symlink[] FromFolderToFolder(string src, string dst)
+        public static LinkGroup FromFolderToFolder(string src, string dst)
         {
             if (!Directory.Exists(src))
-                throw new IOException("Unable to find directory: " + src);
+            {
+                Console.WriteLine("Unable to find directory: {0}", src);
+                return null;
+            }
 
             if (!Directory.Exists(dst))
-                throw new IOException("Unable to find directory: " + dst);
+            {
+                Console.WriteLine("Unable to find directory: {0}", dst);
+                return null;
+            }
 
             Console.Write("Delete files in link folder? (y/N) ");
             ConsoleKey response = Console.ReadKey(false).Key;
             Console.WriteLine();
 
-            List<Symlink> symlinks = new List<Symlink>();
+            LinkGroup linkGroup = new LinkGroup();
 
             foreach (string filename in Directory.EnumerateFiles(src))
             {
-                Symlink sym = new Symlink();
-
                 if (response == ConsoleKey.Y)
                     File.Delete(filename);
 
-                sym.SetLink(filename);
-                sym.SetTarget(dst + "\\" + Path.GetFileName(filename));
-
-                symlinks.Add(sym);
+                linkGroup.AddLink(new Symlink(filename, Path.Combine(dst, Path.GetFileName(filename))));
             }
 
-            return symlinks.ToArray();
-        }
-
-        /**
-         * Open an array of Symlink objects. This is useful together with the FromFolderToFolder
-         * method.
-         *
-         * @param links array of Symlink objects
-         */
-        public static void Open(Symlink[] links)
-        {
-            foreach (Symlink link in links)
-                link.Open();
-        }
-
-        /**
-         * Close an array of Symlink objects. This is useful together with the FromFolderToFolder
-         * method.
-         *
-         * @param links array of Symlink objects
-         */
-        public static void Close(Symlink[] links)
-        {
-            foreach (Symlink link in links)
-                link.Close();
-        }
-
-        /**
-         * Enforce the close operation on an array of Symlinks.
-         *
-         * @param links array of Symlink objects
-         */
-        public static void ForceClose(Symlink[] links)
-        {
-            foreach (Symlink link in links)
-                link.ForceClose();
+            return linkGroup;
         }
     }
 
     /**
      * The DosDevice class is used for creating mappings between the RPC Control object directory
      * and the file system. These mappings are required for creating the pseudo file system links.
+     * DosDevices are treated as resource and are automatically removed after the associated object
+     * was cleaned up. This can be prevented by using the KeepAlive function.
      *
      * Author: Tobias Neitzel (@qtc_de)
      */
@@ -476,74 +638,65 @@ namespace de.usd.SharpLink
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern uint QueryDosDevice(string lpDeviceName, StringBuilder lpTargetPath, uint ucchMax);
 
-        // whether the current object has created the DosDevice
-        private bool created;
-
-        // name of the DosDevice (should match symlink name)
+        // name of the DosDevice
         private string name;
 
         // path to the target file on the file system with the \??\ prefix
         private string target;
 
-        // plain path to the  target file on the file system
-        private string targetName;
+        // whether the DosDevice was already manually closed
+        private bool closed;
+
+        // whether to keep the created DosDevice alive after the object is cleaned up
+        private bool keepAlive;
 
         private const uint DDD_RAW_TARGET_PATH = 0x00000001;
         private const uint DDD_REMOVE_DEFINITION = 0x00000002;
         private const uint DDD_EXACT_MATCH_ON_REMOVE = 0x00000004;
         private const uint DDD_NO_BROADCAST_SYSTEM = 0x00000008;
 
-
         /**
-         * Creating a DosDevice instance requires the DosDevice name that is created within the RPC Control
-         * object directory and the file system path to the targeted file.
+         * DosDevices should be created using the Create function of this class. The Create
+         * function verifies that the requested DosDevice does not already exist before creating
+         * it. If this is the case and the DosDevice does not exist, the Create function uses
+         * this Constructor to instantiate the DosDevice.
          *
-         * @param name DosDevice name
-         * @param target file system path of the target
+         * @param name  name of the DosDevice
+         * @param target  file system path to the target of the DosDevice
+         * @param keepAlive  whether to keep the DosDevice alive after object cleanup
          */
-        public DosDevice(string name, string target)
+        private DosDevice(string name, string target, bool keepAlive)
         {
-            this.created = false;
-            this.name = @"Global\GLOBALROOT\RPC CONTROL\" + name;
-            this.target = @"\??\" + target;
-            this.targetName = target;
+            this.name = name;
+            this.target = target;
+            this.keepAlive = keepAlive;
+
+            this.closed = false;
         }
 
         /**
-         * Set the target of the DosDevice.
-         *
-         * @param name file system path of the new target
+         * If keepAlive was not set to true, cleanup the DosDevice when the object is removed.
          */
-        public void SetTarget(string name)
+        ~DosDevice()
         {
-            this.target = @"\??\" + name;
-            this.targetName = name;
+            if (!keepAlive && !closed)
+                Close();
         }
 
         /**
          * Get the target of the DosDevice.
          *
-         * @return currently configured target of the DosDevice
+         * @return configured target of the DosDevice
          */
-        public string GetTargetName()
+        public string GetTarget()
         {
-            return targetName;
-        }
-
-        /**
-         * Set the name of the DosDevice.
-         *
-         * @param name new name for the DosDevice
-         */
-        public void SetName(string name)
-        {
-            this.name = name;
+            return target;
         }
 
         /**
          * Get the name of the DosDevice.
          *
-         * @return currently configured name of the DosDevice
+         * @return configured name of the DosDevice
          */
         public string GetName()
         {
@@ -551,144 +704,191 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * The actual Open function is defined as a static function. This allows users to manually control
-         * the opening of DosDevices if required. This function is a wrapper around the static function that
-         * passes the preconfigured file system paths. If the static Open function returns true, the DosDevice
-         * was created and we set created to true.
+         * Set the keepAlive property to the specified value.
+         *
+         * @param value  whether to keep the DosDevice alive after object cleanup
          */
-        public void Open()
+        public void KeepAlive(bool value)
         {
-            this.created = Open(name, target);
+            keepAlive = value;
         }
 
         /**
-         * The actual Close function is defined as a static function. This allows users to manually close
-         * DosDevices if required. This function is a wrapper around the static function that passes the
-         * preconfigured file system paths to it. DosDevices are only closed if they were created by this
-         * object.
+         * Cleanup the DosDevice. This is basically a wrapper around the static Close
+         * function.
          */
         public void Close()
         {
-            if (this.created)
-                Close(name, target);
+            Close(name, target);
+            closed = true;
         }
 
         /**
-         * Similar to the previously defined close function, but enforces closing even if device was not created
-         * by this object.
+         * Enforce cleanup of the DosDevice. This is basically a wrapper around the static Close
+         * function.
          */
         public void ForceClose()
         {
-            Close(name, target);
+            Close(name);
+            closed = true;
         }
 
         /**
-         * Symlink objects store DosDevices within a Set which requires a GetHashCode method to be present.
-         * This implementation uses the combination name+target as a unique identifier.
-         */
-        public override int GetHashCode()
-        {
-            return (name + " -> " + target).GetHashCode();
-        }
-
-        /**
-         * Equals wrapper.
+         * Create a new DosDevice with the specified name, pointing to the specified location.
+         * This function should be used to create DosDevice objects, as it checks whether the
+         * requested DosDevice already exists before creating it. If non existing, the DosDevice
+         * is created and a corresponding object is returned by this function. If the DosDevice
+         * does already exist, null is returned.
          *
-         * @param obj object to compare with
+         * @param name  name of the DosDevice
+         * @param target  file system path the DosDevice is pointing to
+         * @param keepAlive  whether to keep the DosDevice alive after object cleanup
+         * @return newly created DosDevice or null
          */
-        public override bool Equals(object obj)
+        public static DosDevice Create(string name, string target, bool keepAlive)
         {
-            return Equals(obj as DosDevice);
-        }
+            name = PrepareDevicePath(name);
+            target = PrepareTargetPath(target);
 
-        /**
-         * Two DosDevices are treated to be equal when they have the same name and target.
-         *
-         * @param other DosDevice to compare with
-         */
-        public bool Equals(DosDevice other)
-        {
-            return (name == other.name) && (target == other.target);
-        }
+            string destination = GetTarget(name);
 
-        /**
-         * Open a new DosDevice with the user specified paths.
-         *
-         * @param name name of the DosDevice
-         * @param to file system path to point to
-         * @return true if the device was successfully created
-         */
-        public static bool Open(string name, string to)
-        {
-            if (CheckOpen(name, to, true))
+            if (destination != null)
             {
-                Console.WriteLine("[+] DosDevice {0} -> {1} does already exist.", name, to);
-                return false;
+                if (destination == target)
+                {
+                    Console.WriteLine("[+] DosDevice {0} -> {1} does already exist.", name, target);
+                    return null;
+                }
+
+                throw new IOException(String.Format("DosDevice {0} does already exist, but points to {0}", name, destination));
             }
 
-            Console.WriteLine("[+] Creating DosDevice: {0} -> {1}", name, to);
+            Console.WriteLine("[+] Creating DosDevice: {0} -> {1}", name, target);
 
-            if (DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH, name, to) &&
-                DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH, name, to))
+            if (DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH, name, target) &&
+                DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH, name, target))
             {
-                return true;
+                return new DosDevice(name, target, keepAlive);
             }
 
             throw new IOException("Unable to create DosDevice.", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
         }
 
         /**
-         * Close the specified DosDevice.
+         * Close the specified DosDevice. A DosDevice is only closed if it's target path patches the target specified
+         * during the function call. Otherwise, a warning is printed and the device is treated as closed, without
+         * actually closing it.
          *
-         * @param name name of the DosDevice
-         * @param to file system path the DosDevice points to
+         * @param name  name of the DosDevice to close
+         * @param target  file system path the DosDevice points to
          */
-        public static void Close(string name, string to)
+        public static void Close(string name, string target)
         {
-            if (!CheckOpen(name, to, true))
+            name = PrepareDevicePath(name);
+            target = PrepareTargetPath(target);
+
+            string destination = GetTarget(name);
+
+            if (destination == null)
+            {
+                Console.WriteLine("[+] DosDevice {0} -> {1} was already closed.", name, target);
                 return;
+            }
 
-            Console.WriteLine("[+] Deleting DosDevice: {0} -> {1}", name, to);
+            if (destination != target)
+            {
+                Console.WriteLine("[!] DosDevice {0} is pointing to {1}.", name, destination);
+                Console.WriteLine("[!] Treating as closed.");
+                return;
+            }
+
+            Console.WriteLine("[+] Deleting DosDevice: {0} -> {1}", name, target);
 
             DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH | DDD_REMOVE_DEFINITION |
-                            DDD_EXACT_MATCH_ON_REMOVE, name, to);
+                            DDD_EXACT_MATCH_ON_REMOVE, name, target);
 
             DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH | DDD_REMOVE_DEFINITION |
-                            DDD_EXACT_MATCH_ON_REMOVE, name, to);
+                            DDD_EXACT_MATCH_ON_REMOVE, name, target);
         }
 
         /**
-         * Uses the QueryDosDevice function to determine whether the DosDevice does already exist. Returns true
-         * in this case, false otherwise. When called with verbose set to true, a warning is printed when a DosDevive
-         * with the requested device name does alreday exist, but the target name is different.
-         * 
-         * @param name name of the DosDevice
-         * @param to file system path the DosDevice points to
-         * @return true if the dos device exists, false otherwise
+         * Simplified version of the Close function that does not perform a target check.
+         *
+         * @param name  name of the DosDevice to close
+         * @param target  file system path the DosDevice points to
          */
-        public static bool CheckOpen(string name, string to, bool verbose)
+        public static void Close(string name)
         {
+            name = PrepareDevicePath(name);
+
+            Console.WriteLine("[+] Deleting DosDevice: {0}", name);
+
+            DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH | DDD_REMOVE_DEFINITION |
+                            DDD_EXACT_MATCH_ON_REMOVE, name, null);
+
+            DefineDosDevice(DDD_NO_BROADCAST_SYSTEM | DDD_RAW_TARGET_PATH | DDD_REMOVE_DEFINITION |
+                            DDD_EXACT_MATCH_ON_REMOVE, name, null);
+        }
+
+        /**
+         * Get the target of the specified DosDevice name.
+         *
+         * @param name  name of the DosDevice to obtain the target from
+         */
+        public static string GetTarget(string name)
+        {
+            name = PrepareDevicePath(name);
+
             StringBuilder pathInformation = new StringBuilder(250);
             uint result = QueryDosDevice(name, pathInformation, 250);
 
-            String destination = pathInformation.ToString();
-
             if (result == 0)
-                return false;
+                return null;
 
-            if (destination != to && verbose)
-            {
-                Console.WriteLine("[!] Warning: DosDevice {0} exists but is pointing to {1}.", name, destination);
-                Console.WriteLine("[!] DosDevice is treated as open, but may point to an unintended location.");
-            }
+            return pathInformation.ToString();
+        }
 
-            return true;
+        /**
+         * DosDevices created by this class are expected to originate from the RPC Control object directory.
+         * This function applies the corresponding prefix to the specified DosDevice path, if required. If
+         * the prefix is already used, the path is returned without modification.
+         * 
+         * @param path  DosDevice path
+         * @return prefixed path if prefixing was necessary, the original path otherwise
+         */
+        public static string PrepareDevicePath(string path)
+        {
+            string prefix = @"Global\GLOBALROOT\RPC CONTROL\";
+
+            if (path.StartsWith(prefix))
+                return path;
+
+            return prefix + path;
+        }
+
+        /**
+         * Target file system paths of DosDevices require the '\??\' prefix. This function applies the
+         * prefix if not already applied.
+         * 
+         * @param path  file system path
+         * @return prefixed path if prefixing was necessary, the original path otherwise
+         */
+        public static string PrepareTargetPath(string path)
+        {
+            string prefix = @"\??\";
+
+            if (path.StartsWith(prefix))
+                return path;
+
+            return prefix + path;
         }
     }
 
     /**
      * The Junction class is used for creating file system junctions from C#. Together with
      * DosDevices, Junctions are used to build pseudo symbolic links on the file system.
+     * Junctions are treated as resources and are automatically cleaned up after the corresponding
+     * object is deleted. This default bahvior can be changed by using the KeepAlive function.
      *
      * Author: Tobias Neitzel (@qtc_de)
      */
@@ -700,17 +900,20 @@ namespace de.usd.SharpLink
         [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true, CharSet = CharSet.Auto)]
         static extern bool DeviceIoControl(IntPtr hDevice, uint dwIoControlCode, IntPtr lpInBuffer, int nInBufferSize, IntPtr lpOutBuffer, int nOutBufferSize, out int lpBytesReturned, IntPtr lpOverlapped);
 
-        // whether the current instance has created the Junction
-        private bool created;
-
-        // whether the junction directory was created by this instance
-        private bool dirCreated;
-
         // base directory the junction starts from
         private string baseDir;
 
         // target directory the junction is pointing to
         private string targetDir;
+
+        // whether to keep the associated Junction alive when the object is cleaned up
+        private bool keepAlive;
+
+        // whether the DosDevice was already closed manually
+        private bool closed;
+
+        // whether the junction directory was created by this instance
+        private bool dirCreated;
 
         private const int FSCTL_SET_REPARSE_POINT = 0x000900A4;
         private const int FSCTL_GET_REPARSE_POINT = 0x000900A8;
@@ -721,26 +924,34 @@ namespace de.usd.SharpLink
         private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
 
         /**
-         * By default, Junctions are created using the user specified baseDir and point to the
-         * RPC Control object directory.
+         * Junction objects should be created by the static Create function. The Create function
+         * first verifies whether the corresponding Junction exists on the file system. Only if
+         * this is not the case, the Junction object is created by using this constructor.
          *
-         * @param baseDir base directory for the junction
+         * @param baseDir  base directory the Junction originates from
+         * @param targetDir  target directory the Junction is pointing to
+         * @param dirCreated  whether the baseDir was created during Junction creation
+         * @param keepAlive  whether to keep the Junction alive after object cleanup
          */
-        public Junction(String baseDir) : this(baseDir, @"\RPC CONTROL") { }
-
-        /**
-         * For some reasons, users may want to create a Junction with a custom target.
-         *
-         * @param baseDir base directory for the junction
-         * @param targetDir target directory of the junction
-         */
-        public Junction(String baseDir, String targetDir)
+        private Junction(string baseDir, string targetDir, bool dirCreated, bool keepAlive)
         {
-            this.created = false;
-            this.dirCreated = false;
-
             this.baseDir = baseDir;
             this.targetDir = targetDir;
+
+            this.dirCreated = dirCreated;
+            this.keepAlive = keepAlive;
+
+            this.closed = false;
+        }
+
+        /**
+         * If the keepAlive property was not set to true, remove the underlying Junction during
+         * object cleanup.
+         */
+        ~Junction()
+        {
+            if (!keepAlive && !closed)
+                Close();
         }
 
         /**
@@ -764,111 +975,75 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * Set the base directory of the junction.
+         * Set the keepAlive property of the Junction object to the specified value.
          *
-         * @return baseDir file system path used as base directory for the junction
+         * @param value  whether to keep the Junction alive after object cleanup
          */
-        public void SetBaseDir(string baseDir)
+        public void KeepAlive(bool value)
         {
-            this.baseDir = baseDir;
-        }
-
-        /**
-         * Set the target directory of the junction.
-         *
-         * @return targetDir file system path used as target directory of the junction
-         */
-        public void SetTargetDir(string targetDir)
-        {
-            this.targetDir = targetDir;
-        }
-
-        /**
-         * Wrapper around the static Open function that performs the actual operation.
-         */
-        public void Open()
-        {
-            if (!Directory.Exists(baseDir))
-            {
-                Directory.CreateDirectory(baseDir);
-                this.dirCreated = true;
-            }
-
-            this.created = Open(baseDir, targetDir);
+            keepAlive = value;
         }
 
         /**
          * Wrapper around the static Close function that performs the actual operation.
-         * Junctions are only removed if they were created by this object.
+         * If the Junction's baseDir was created by this object, remove it too.
          */
         public void Close()
         {
-            if (!this.created)
-                return;
-
             Close(baseDir, targetDir);
+            closed = true;
 
-            if (this.dirCreated)
+            if (Directory.Exists(baseDir) && dirCreated)
                 Directory.Delete(baseDir);
         }
 
         /**
-         * Enforce closing of the junction object. Skips the created check.
+         * Wrapper around the static Close function that performs the actual operation.
+         * This version of the Close function enforces closing of the underlying Junction
+         * object, even when the targetDir path does not match for the Junction located at
+         * baseDir
          */
         public void ForceClose()
         {
             Close(baseDir);
+            closed = true;
 
-            if (this.dirCreated)
+            if (Directory.Exists(baseDir) && dirCreated)
                 Directory.Delete(baseDir);
         }
 
         /**
-         * Instances of Symlink store Junction objects within a Set. This requires the Junction class to implement
-         * the GetHashCode method. Junctions are uniquly identified by the combination of baseDir+targetDir.
-         */
-        public override int GetHashCode()
-        {
-            return (baseDir + " -> " + targetDir).GetHashCode();
-        }
-
-        /**
-         * Equals wrapper.
-         */
-        public override bool Equals(object obj)
-        {
-            return Equals(obj as Junction);
-        }
-
-        /**
-         * Two Junction objects are treated equals if they have a matching baseDir and targetDir.
-         */
-        public bool Equals(Junction other)
-        {
-            return (baseDir == other.baseDir) && (targetDir == other.targetDir);
-        }
-
-        /**
-         * Create (open) the junction. The function first checks whether a corresponding junction already
+         * Create a Junction. This function first checks whether a corresponding Junction already
          * exists and uses the DeviceIoControl function to create one if this is not the case.
+         * If a Junction was created by this function, it is returned as return value. Otherwise,
+         * null is returned.
          *
-         * @param baseDir directory to create the junction from
-         * @param targetDir directory the junction is pointing to
-         * @return true if the junction was created by this function
+         * @param baseDir  directory to create the junction from
+         * @param targetDir  directory the junction is pointing to
+         * @param keepAlive  whether to keep the Junction alive after object cleanup
+         * @return Junction object if a Junction was created, null otherwise
          */
-        public static bool Open(string baseDir, string targetDir)
+        public static Junction Create(string baseDir, string targetDir, bool keepAlive)
         {
+            bool dirCreated = false;
+
             if (!Directory.Exists(baseDir))
             {
-                throw new IOException("Junction base directory " + baseDir + " does not exist");
+                Directory.CreateDirectory(baseDir);
+                dirCreated = true;
             }
 
             string existingTarget = GetTarget(baseDir);
 
-            if (existingTarget != null && existingTarget == @"\RPC CONTROL")
+            if (existingTarget != null)
             {
-                Console.WriteLine("[+] Junction {0} -> \\RPC Control does already exist.", baseDir);
-                return false;
+                if (existingTarget == targetDir)
+                {
+                    Console.WriteLine("[+] Junction {0} -> {1} does already exist.", baseDir, targetDir);
+                    return null;
+                }
+
+                throw new IOException(String.Format("Junction {0} exists, but points to {1}", baseDir, existingTarget));
             }
 
             DirectoryInfo baseDirInfo = new DirectoryInfo(baseDir);
@@ -892,12 +1067,12 @@ namespace de.usd.SharpLink
                 }
 
                 else
-                    throw new IOException("Junction directory needs to be empty!");
+                    throw new IOException("Junction directory needs to be empty.");
             }
 
             Console.WriteLine("[+] Creating Junction: {0} -> {1}", baseDir, targetDir);
 
-            using (var safeHandle = OpenReparsePoint(baseDir))
+            using (SafeFileHandle safeHandle = OpenReparsePoint(baseDir))
             {
                 var targetDirBytes = Encoding.Unicode.GetBytes(targetDir);
                 var reparseDataBuffer = new REPARSE_DATA_BUFFER
@@ -928,10 +1103,11 @@ namespace de.usd.SharpLink
                         inBuffer, targetDirBytes.Length + 20, IntPtr.Zero, 0, out bytesReturned, IntPtr.Zero);
 
                     if (!result)
-                        throw new IOException("Unable to create Junction!", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+                        throw new IOException("Unable to create Junction.", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
 
-                    return true;
+                    return new Junction(baseDir, targetDir, dirCreated, keepAlive);
                 }
+
                 finally
                 {
                     Marshal.FreeHGlobal(inBuffer);
@@ -940,12 +1116,12 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * Remove (close) the junction. The function first checks whether the junction is open and needs to be closed.
-         * If this is the case, the DeviceIoControl function is used to close it. If the junction points to a unexpected
-         * target, it isn't closed.
+         * Close a Junction. The function first checks whether the Junction is open and needs to be closed.
+         * If this is the case, the DeviceIoControl function is used to close it. If the Junction points to
+         * an unexpected target, it isn't closed.
          *
-         * @param baseDir base directory of the junction
-         * @param targetDir target directory of the junction
+         * @param baseDir  base directory of the Junction
+         * @param targetDir  target directory of the Junction
          */
         public static void Close(string baseDir, string targetDir)
         {
@@ -959,8 +1135,8 @@ namespace de.usd.SharpLink
 
             else if (target != targetDir)
             {
-                Console.WriteLine("[!] Junction points to an unexpected location.");
-                Console.WriteLine("[!] Keeping it open.");
+                Console.WriteLine("[!] Junction {0} points to {1}", baseDir, target);
+                Console.WriteLine("[!] Treating as closed.");
                 return;
             }
 
@@ -968,7 +1144,7 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * Simplified version of the Close function that skips check on the junction target.
+         * Simplified version of the Close function that skips check on the expected Junction target.
          *
          * @param baseDir base directory of the junction
          */
@@ -976,7 +1152,7 @@ namespace de.usd.SharpLink
         {
             Console.WriteLine("[+] Removing Junction: {0}", baseDir);
 
-            using (var safeHandle = OpenReparsePoint(baseDir))
+            using (SafeFileHandle safeHandle = OpenReparsePoint(baseDir))
             {
                 var reparseDataBuffer = new REPARSE_DATA_BUFFER
                 {
@@ -1011,10 +1187,10 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * Attempt to obtain the repase point from the current junction configuration. This can be used to
-         * determine whether the junction is open and points to the exepcetd location.
+         * Attempt to obtain the repase point from the specified file system path. This is used to determine
+         * whether a Junction is open and points to the exepcetd location.
          *
-         * @param baseDir base directory of the junction
+         * @param baseDir  base directory of the Junction
          * @return target the junction is poiting to
          */
         public static string GetTarget(string baseDir)
@@ -1072,10 +1248,10 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * Create a SafeFileHandle for the current junction configuration.
+         * Create a SafeFileHandle for the requested file system path.
          *
-         * @param baseDir base directory of the junction
-         * @return SafeFileHandle file handle for the junction
+         * @param baseDir  base directory of the Junction
+         * @return SafeFileHandle for the requested file system path
          */
         private static SafeFileHandle OpenReparsePoint(string baseDir)
         {
@@ -1096,7 +1272,7 @@ namespace de.usd.SharpLink
      *
      * Author: Tobias Neitzel (@qtc_de)
      */
-    public class RegistryLink
+    public class RegistryLink : ILink
     {
         [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
         static extern int NtCreateKey(out IntPtr KeyHandle, uint DesiredAccess, [In] OBJECT_ATTRIBUTES ObjectAttributes, int TitleIndex, [In] string Class, int CreateOptions, out int Disposition);
@@ -1113,9 +1289,6 @@ namespace de.usd.SharpLink
         [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
         static extern int NtQueryValueKey(SafeRegistryHandle KeyHandle, UNICODE_STRING ValueName, uint InformationClass, out KEY_VALUE_INFORMATION ValueInformation, int size, out int sizeRequired);
 
-        [DllImport("ntdll.dll", ExactSpelling = true, SetLastError = false)]
-        static extern int NtClose(SafeRegistryHandle KeyHandle);
-
         enum KEY_VALUE_INFORMATION_CLASS : uint
         {
             KeyValueBasicInformation,
@@ -1130,8 +1303,8 @@ namespace de.usd.SharpLink
         private const uint ATTRIBUT_FLAG_OBJ_OPENLINK = 0x00000100;
         private const uint ATTRIBUT_FLAG_CASE_INSENSITIVE = 0x00000040;
 
-        private const uint KEY_ALL_ACCESS = 0x02000000;
-        private const uint KEY_READ = 0x20019;
+        // combines KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_CREATE_LINK and DELETE
+        private const uint KEY_LINK_ACCESS = 0x0001 | 0x0002 | 0x0020 | 0x00010000;
         private const int KEY_TYPE_LINK = 0x0000006;
 
         private const int REG_OPTION_OPEN_LINK = 0x0008;
@@ -1139,135 +1312,160 @@ namespace de.usd.SharpLink
 
         private const string regpath = @"\Registry\";
 
+        // path of the RegistryLink within the registry
+        private string key;
+
+        // target of the RegistryLink
+        private string target;
+
+        // whether the phyiscal registry link was created by this object
+        private bool created;
+
+        // whether the RegistryLink was already manually be closed
+        private bool closed;
+
         // whether to keep the registry link open after the RegistryLink instance was cleaned up
-        private bool keepOpen;
-
-        // shared target of all registry links
-        private String target;
-
-        // a set containing all associated registry links that point to the shared target 
-        private HashSet<string> links;
-
-        // a set containing all links that have been opened by this cotnainer
-        private HashSet<string> openedLinks;
+        private bool keepAlive;
 
         /**
-         * Create a new instance of RegistryLink. The constructor is used without specifying any
-         * attributes and only performs some initalization. Attributes like the target and the actual
-         * links should be assigned on the created object.
+         * RegistryLinks are created by specifying the location they should be created in and the location
+         * they should point to.         *
+         *
+         * @param key  key location the RegistryLink is created in
+         * @param target  target key the RegistryLink is pointing to
          */
-        public RegistryLink()
+        public RegistryLink(string key, string target) : this(key, target, false) { }
+
+        /**
+         * RegistryLinks are created by specifying the location they should be created in and the location
+         * they should point to. Additionally, this constructor allows specifying the keepAlive value of
+         * the link, which determines whether the physical link should be kept alive after the object is
+         * gone.
+         *
+         * @param key  key location the RegistryLink is created in
+         * @param target  target key the RegistryLink is pointing to
+         * @param keepAlive  whether to keep the physical link alive after object cleanup
+         */
+        public RegistryLink(string key, string target, bool keepAlive)
         {
-            this.target = "";
-            this.keepOpen = false;
-            this.links = new HashSet<string>();
-            this.openedLinks = new HashSet<string>();
+            this.key = RegPathToNative(key);
+            this.target = RegPathToNative(target);
+            this.keepAlive = keepAlive;
+
+            this.created = false;
+            this.closed = false;
         }
 
         /**
-         * When a RegistryLink instance is cleaned up, it closes all remaining links automatically, except
-         * when keepOpen is set to true.
+         * When keepAlive was not set to true, close the physical registry links when the RegistryLink
+         * object goes out of scope.
          */
         ~RegistryLink()
         {
-            if (keepOpen)
-                return;
-
-            this.Close();
+            if (!keepAlive && !closed)
+                Close();
         }
 
         /**
-         * Tell the RegistryLink instance to keep registry links alive even after closing.
+         * Set the keepAlive property on the RegistryKey object to true.
          */
-        public void keepAlive()
+        public void KeepAlive()
         {
-            this.keepOpen = true;
+            KeepAlive(true);
         }
 
         /**
-         * Set the shared target for all registry links.
+         * Set the keepAlive property on the RegistryKey object to the specified value.
          *
-         * @param target shared target for all registry links
+         * @param value  whether to keep the registry link alive after the object was cleaned up
          */
-        public void SetTarget(string target)
+        public void KeepAlive(bool value)
         {
-            this.target = RegistryLink.RegPathToNative(target);
+            keepAlive = value;
         }
 
         /**
-         * Return the currently configured shared target.
+         * Return the target of the RegistryKey.
          *
-         * @return shared target for all registry links
+         * @return target of the RegistryKey
          */
         public string GetTarget()
         {
-            return this.target;
+            return target;
         }
 
         /**
-         * Return a list with all registry links that are stored in this container.
-         *
-         * @return list of registry links in this container
-         */
-        public string[] GetLinks()
-        {
-            return links.ToArray<String>();
-        }
-
-        /**
-         * Remove all alreday configured links and replace them by the specified one.
-         *
-         * @param link registry key to create the link in
-         */
-        public void SetLink(string link)
-        {
-            links.Clear();
-            this.AddLink(link);
-        }
-
-        /**
-         * Add a new registry link to the list of configured links.
-         *
-         * @param link registry key to create the link in
-         */
-        public void AddLink(string link)
-        {
-            this.links.Add(RegistryLink.RegPathToNative(link));
-        }
-
-        /**
-         * Wrapper around the static Open function. Open all links contained within this container.
-         * This requires a target to be set.
+         * Wrapper around the static Open function. Opens the RegistryKey.
          */
         public void Open()
         {
-            if (target == "")
-                throw new IOException("SetTarget needs to be called first.");
-
-            foreach (string link in links)
-
-                if (Open(link, target))
-                    openedLinks.Add(link);
+            created = Open(key, target);
+            closed = false;
         }
 
-
         /**
-         * Wrapper around the static Close function. Closes all opened keys in the current container.
+         * Wrapper around the static Close function. Closes the RegistryKey.
          */
         public void Close()
         {
-            foreach (String key in openedLinks)
+            if (created)
                 Close(key, target);
+
+            closed = true;
         }
 
         /**
-         * Enforce closing of all keys in the container, independent of whether they were opened by
+         * Enforce closing of the RegistryKey, independent whether they were opened by
          * this object.
          */
         public void ForceClose()
         {
-            foreach (String key in links)
-                Close(key);
+            Close(key);
+            closed = true;
+        }
+
+        /**
+         * Print some information on the RegistryKey. This includes the key name, the path to the
+         * target key and whether the physical registry key was created by this object.
+         */
+        public void PrintStatus()
+        {
+            Console.WriteLine("[+] Link Type: Registry key");
+            Console.WriteLine("[+] \tLink key: {0}", key);
+            Console.WriteLine("[+] \tTarget path: {0}", target);
+            Console.WriteLine("[+] \tCreated: {0}", created);
+        }
+
+        /**
+         * RegistryLinks may be stored within a LinkGroup. LinkGroups store the associated Links within
+         * a HashSet, which requires RegistryLink to be hashable. The hashcode of a RegistryLinks is
+         * calculated by using the key + target combination.
+         *
+         * @return hashcode of the RegistryLink
+         */
+        public override int GetHashCode()
+        {
+            return (key + " -> " + target).GetHashCode();
+        }
+
+        /**
+         * Equals wrapper.
+         *
+         * @param obj  object to compare with
+         */
+        public override bool Equals(object obj)
+        {
+            return Equals(obj as RegistryLink);
+        }
+
+        /**
+         * Two RegistryLinks are equal if they have the same key and the same target.
+         *
+         * @param other  RegistryLink to compare with
+         */
+        public bool Equals(RegistryLink other)
+        {
+            return (key == other.key) && (target == other.target);
         }
 
         /**
@@ -1275,8 +1473,8 @@ namespace de.usd.SharpLink
          * If the key location already exists, the user is requested whether it should be deleted.
          * If the key location is already a symbolic link, the link is left untouched.
          *
-         * @param from registry key to create the link from
-         * @param to target for the symbolic link registry key
+         * @param from  registry key to create the link from
+         * @param to  target for the symbolic link registry key
          * @return true if the key was created by this function
          */
         public static bool Open(string from, string to)
@@ -1288,7 +1486,7 @@ namespace de.usd.SharpLink
 
             else
             {
-                String linkPath = GetLinkTarget(handle);
+                string linkPath = GetLinkTarget(handle);
 
                 if (linkPath == null)
                 {
@@ -1296,22 +1494,21 @@ namespace de.usd.SharpLink
                     ConsoleKey response = Console.ReadKey(false).Key;
                     Console.WriteLine();
 
-                    if (response == ConsoleKey.Y)
+                    if (response != ConsoleKey.Y)
                     {
-                        NtDeleteKey(handle);
-                        NtClose(handle);
-                        handle = CreateKey(from);
+                        handle.Dispose();
+                        throw new IOException("Cannot continue without deleting the key.");
                     }
 
-                    else
-                    {
-                        Console.WriteLine("[!] Cannot continue without deleting the key.");
-                        return false;
-                    }
+                    DeleteKey(handle, from);
+                    handle.Dispose();
+                    handle = CreateKey(from);
                 }
 
                 else
                 {
+                    handle.Dispose();
+
                     if (linkPath == to)
                     {
                         Console.WriteLine("[+] Registry link {0} -> {1} alreday exists.", from, to);
@@ -1329,11 +1526,11 @@ namespace de.usd.SharpLink
 
             Console.WriteLine("Making registry key {0} a symlink poitning to {1}.", from, to);
             int status = NtSetValueKey(handle, value_name, 0, KEY_TYPE_LINK, data, data.Length);
-            NtClose(handle);
+            handle.Dispose();
 
             if (status != 0)
             {
-                throw new IOException("Failure while linking " + from + " to " + to);
+                throw new IOException(String.Format("Failure while linking {0} to {1}", from, to));
             }
 
             Console.WriteLine("Symlink setup successful!");
@@ -1345,64 +1542,96 @@ namespace de.usd.SharpLink
          * and compares it with the actual target during the delete process. If the targets do not match, the
          * key is not closed.
          *
-         * @param key registry key to close
-         * @param target expected target of the registry key
+         * @param key  registry key to close
+         * @param target  expected target of the registry key
          */
         public static void Close(string key, string target)
         {
-            SafeRegistryHandle handle = OpenKey(key);
+            string linkTarget = GetLinkTarget(key);
 
-            if (key == null)
-                Console.WriteLine("[!] Registry link {0} was already deleted.", key);
-
-            else
+            if (linkTarget == null)
             {
-                string linkTarget = GetLinkTarget(handle);
-
-                if (linkTarget == null)
-                {
-                    Console.WriteLine("[!] Registry key {0} is no longer a symlink.", key);
-                    Console.WriteLine("[!] Not deleting it.");
-                }
-
-                else if (linkTarget != target)
-                {
-                    Console.WriteLine("[!] Registry key {0} is pointing to an unexpected target: {1}.", key, linkTarget);
-                    Console.WriteLine("[!] Not deleting it.");
-                }
-
-                else
-                    DeleteKey(handle, key);
+                Console.WriteLine("[!] Registry key {0} is no longer a symlink.", key);
+                Console.WriteLine("[!] Not deleting it.");
             }
 
-            NtClose(handle);
+            else if (linkTarget != target)
+            {
+                Console.WriteLine("[!] Registry key {0} is pointing to an unexpected target: {1}.", key, linkTarget);
+                Console.WriteLine("[!] Not deleting it.");
+            }
+
+            else
+                Close(key);
         }
 
         /**
          * A simplified version of the Close function that just removes the specified key without further
          * checks.
          *
-         * @param key registry key to close
+         * @param key  registry key to close
          */
         public static void Close(string key)
         {
-            SafeRegistryHandle handle = OpenKey(key);
+            using (SafeRegistryHandle handle = OpenKey(key))
+            {
+                if (handle == null)
+                    Console.WriteLine("[!] Registry link {0} was already closed.", key);
 
-            if (key == null)
-                Console.WriteLine("[!] Registry link {0} was already deleted.", key);
+                else
+                    DeleteKey(handle, key);
+            }
+        }
 
-            else
-                DeleteKey(handle, key);
+        /**
+         * Return the target of a registry symbolic link.
+         *
+         * @param key  registry key name of the link to obtain the target from
+         * @return symbolic link target or null, if not a symbolic link
+         */
+        public static string GetLinkTarget(string key)
+        {
+            using (SafeRegistryHandle handle = OpenKey(key))
+            {
+                return GetLinkTarget(handle);
+            }
+        }
 
-            NtClose(handle);
+        /**
+         * Return the target of a registry symbolic link.
+         *
+         * @param handle  SafeRegistryHandle of the target key
+         * @return symbolic link target or null, if not a symbolic link
+         */
+        private static string GetLinkTarget(SafeRegistryHandle handle)
+        {
+            if (handle == null)
+                return null;
+
+            KEY_VALUE_INFORMATION record = new KEY_VALUE_INFORMATION
+            {
+                TitleIndex = 0,
+                Type = 0,
+                DataLength = 0,
+                Data = new byte[0x400]
+            };
+
+            int status, length = 0;
+            status = NtQueryValueKey(handle, new UNICODE_STRING("SymbolicLinkValue"), (uint)KEY_VALUE_INFORMATION_CLASS.KeyValuePartialInformation,
+                                     out record, Marshal.SizeOf(record), out length);
+
+            if (status == 0)
+                return System.Text.Encoding.Unicode.GetString(record.Data.Take((int)record.DataLength).ToArray());
+
+            return null;
         }
 
         /**
          * Delete the specified registry key.
          *
-         * @param key registry key to delete
+         * @param handle   handle to the registry key to delete
          */
-        public static void DeleteKey(SafeRegistryHandle handle)
+        private static void DeleteKey(SafeRegistryHandle handle)
         {
             DeleteKey(handle, "");
         }
@@ -1410,15 +1639,18 @@ namespace de.usd.SharpLink
         /**
          * Delete the specified registry key.
          *
-         * @param key registry key to delete
-         * @param display name of the key
+         * @param handle  handle to the registry key to delete
+         * @param display  name of the key
          */
-        public static void DeleteKey(SafeRegistryHandle handle, String key)
+        private static void DeleteKey(SafeRegistryHandle handle, string key)
         {
             int status = NtDeleteKey(handle);
 
             if (status != 0)
-                throw new IOException("Unable to remove registry key " + key);
+            {
+                handle.Dispose();
+                throw new IOException(String.Format("Unable to remove registry key {0}", key));
+            }
 
             Console.WriteLine("[+] Registry key {0} was successfully removed.", key);
         }
@@ -1429,7 +1661,7 @@ namespace de.usd.SharpLink
          * @param path registry key to create
          * @return SafeRegistryHandle for the created key
          */
-        public static SafeRegistryHandle CreateKey(string path)
+        private static SafeRegistryHandle CreateKey(string path)
         {
             OBJECT_ATTRIBUTES obj_attr = new OBJECT_ATTRIBUTES(path, ATTRIBUT_FLAG_CASE_INSENSITIVE);
             int disposition = 0;
@@ -1437,7 +1669,7 @@ namespace de.usd.SharpLink
             Console.WriteLine("Creating registry key {0}.", path);
 
             IntPtr handle;
-            int status = NtCreateKey(out handle, KEY_ALL_ACCESS, obj_attr, 0, null, REG_OPTION_CREATE_LINK, out disposition);
+            int status = NtCreateKey(out handle, KEY_LINK_ACCESS, obj_attr, 0, null, REG_OPTION_CREATE_LINK, out disposition);
 
             if (status == 0)
                 return new SafeRegistryHandle(handle, true);
@@ -1451,12 +1683,12 @@ namespace de.usd.SharpLink
          * @param path registry key to open the handle on
          * @return SafeRegistryHandle for the specified key
          */
-        public static SafeRegistryHandle OpenKey(string path)
+        private static SafeRegistryHandle OpenKey(string path)
         {
             OBJECT_ATTRIBUTES obj_attr = new OBJECT_ATTRIBUTES(path, ATTRIBUT_FLAG_CASE_INSENSITIVE | ATTRIBUT_FLAG_OBJ_OPENLINK);
 
             IntPtr handle;
-            uint status = NtOpenKeyEx(out handle, KEY_ALL_ACCESS, obj_attr, REG_OPTION_OPEN_LINK);
+            uint status = NtOpenKeyEx(out handle, KEY_LINK_ACCESS, obj_attr, REG_OPTION_OPEN_LINK);
 
             if (status == 0)
                 return new SafeRegistryHandle(handle, true);
@@ -1468,35 +1700,9 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * Return the target of a registry symbolic link.
-         *
-         * @param handle SafeRegistryHandle of an opened registry key
-         * @return symbolic link target or null, if not a symbolic link
-         */
-        public static string GetLinkTarget(SafeRegistryHandle handle)
-        {
-            KEY_VALUE_INFORMATION record = new KEY_VALUE_INFORMATION
-            {
-                TitleIndex = 0,
-                Type = 0,
-                DataLength = 0,
-                Data = new byte[0x400]
-            };
-
-            int status;
-            int length = 0;
-            status = NtQueryValueKey(handle, new UNICODE_STRING("SymbolicLinkValue"), (uint)KEY_VALUE_INFORMATION_CLASS.KeyValuePartialInformation, out record, Marshal.SizeOf(record), out length);
-
-            if (status == 0)
-                return System.Text.Encoding.Unicode.GetString(record.Data.Take((int)record.DataLength).ToArray());
-
-            return null;
-        }
-
-        /**
          * Translate registry paths to their native format.
          *
-         * @param path user specified registry path
+         * @param path  user specified registry path
          * @return native registry path
          */
         public static string RegPathToNative(string path)
