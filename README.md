@@ -20,7 +20,7 @@ within the [docs folder](/docs).
 
 #### File System
 
-```powershell
+```console
 PS C:\> $code = (iwr https://raw.githubusercontent.com/usdAG/SharpLink/main/SharpLink.cs).content
 PS C:\> Add-Type $code
                                                                                                  
@@ -43,7 +43,7 @@ PS C:\> $s.Close()
 
 #### Windows Registry
 
-```powershell
+```console
 PS C:\> $code = (iwr https://raw.githubusercontent.com/usdAG/SharpLink/main/SharpLink.cs).content
 PS C:\> Add-Type $code
 
@@ -65,7 +65,7 @@ PS C:\> $r.Close()
 
 #### LinkGroups
 
-```powershell
+```console
 PS C:\> $g = New-Object de.usd.SharpLink.LinkGroup
 PS C:\> $g.AddSymlink("C:\Users\Public\Example\link", "C:\ProgramData\target.txt")
 PS C:\> $g.AddSymlink("C:\Users\Public\Example\link2", "C:\ProgramData\target2.txt")
