@@ -134,8 +134,8 @@ namespace de.usd.SharpLink
     {
         void Open();
         void Close();
+        void Status();
         void ForceClose();
-        void PrintStatus();
         void KeepAlive(bool value);
     }
 
@@ -177,9 +177,9 @@ namespace de.usd.SharpLink
          * @param path  path the symlink should be created from
          * @param target  target the symlink should be pointing to
          */
-        public void AddLink(string path, string target)
+        public void AddSymlink(string path, string target)
         {
-            AddLink(path, target, false);
+            AddSymlink(path, target, false);
         }
 
         /**
@@ -191,7 +191,7 @@ namespace de.usd.SharpLink
          * @param target  target the symlink should be pointing to
          * @param keepAlive  whether to keep the symlink alive after the object is cleaned up
          */
-        public void AddLink(string path, string target, bool keepAlive)
+        public void AddSymlink(string path, string target, bool keepAlive)
         {
             links.Add(new Symlink(path, target, keepAlive));
         }
@@ -293,14 +293,14 @@ namespace de.usd.SharpLink
          * Print some status information on the current group. This includes the number of
          * contained Links and the detailes of them.
          */
-        public void PrintStatus()
+        public void Status()
         {
-            Console.WriteLine("[+] LinkGroup contains {0} symbolic links", links.Count);
+            Console.WriteLine("[+] LinkGroup contains {0} link(s):", links.Count);
 
             foreach (ILink link in links)
             {
                 Console.WriteLine("[+]");
-                link.PrintStatus();
+                link.Status();
             }
         }
     }
@@ -415,9 +415,9 @@ namespace de.usd.SharpLink
          * Print some status information on the link. This includes the link path and target path as well as
          * the associated Junction and DosDevice.
          */
-        public void PrintStatus()
+        public void Status()
         {
-            Console.WriteLine("[+] Link type: File system link");
+            Console.WriteLine("[+] Link type: File system symbolic link");
             Console.WriteLine("[+] \tLink path: {0}", path);
             Console.WriteLine("[+] \tTarget path: {0}", target);
 
@@ -442,7 +442,7 @@ namespace de.usd.SharpLink
 
             if (String.IsNullOrEmpty(linkDir))
             {
-                Console.WriteLine("Symlinks require at least one upper directory (e.g. example\\link)");
+                Console.WriteLine("[-] Symlinks require at least one upper directory (e.g. example\\link)");
                 return;
             }
 
@@ -461,6 +461,13 @@ namespace de.usd.SharpLink
          */
         public void Close()
         {
+            if (junction == null && dosDevice == null)
+            {
+                Console.WriteLine("[!] The current Symlink does not hold ownership on any Junction or DosDevice.");
+                Console.WriteLine("[!] Use ForceClose if you really want to close it.");
+                return;
+            }
+
             if (junction != null)
                 junction.Close();
 
@@ -533,11 +540,11 @@ namespace de.usd.SharpLink
         {
             if (!File.Exists(path))
             {
-                Console.WriteLine("Unable to find file: {0}", path);
+                Console.WriteLine("[-] Unable to find file: {0}", path);
                 return null;
             }
 
-            Console.Write("Delete existing filer? (y/N) ");
+            Console.Write("[?] Delete existing file? (y/N) ");
             ConsoleKey response = Console.ReadKey(false).Key;
             Console.WriteLine();
 
@@ -559,11 +566,11 @@ namespace de.usd.SharpLink
         {
             if (!Directory.Exists(src))
             {
-                Console.WriteLine("Unable to find directory: {0}", src);
+                Console.WriteLine("[-] Unable to find directory: {0}", src);
                 return null;
             }
 
-            Console.Write("Delete files in link folder? (y/N) ");
+            Console.Write("[?] Delete files in link folder? (y/N) ");
             ConsoleKey response = Console.ReadKey(false).Key;
             Console.WriteLine();
 
@@ -594,17 +601,17 @@ namespace de.usd.SharpLink
         {
             if (!Directory.Exists(src))
             {
-                Console.WriteLine("Unable to find directory: {0}", src);
+                Console.WriteLine("[-] Unable to find directory: {0}", src);
                 return null;
             }
 
             if (!Directory.Exists(dst))
             {
-                Console.WriteLine("Unable to find directory: {0}", dst);
+                Console.WriteLine("[-] Unable to find directory: {0}", dst);
                 return null;
             }
 
-            Console.Write("Delete files in link folder? (y/N) ");
+            Console.Write("[?] Delete files in link folder? (y/N) ");
             ConsoleKey response = Console.ReadKey(false).Key;
             Console.WriteLine();
 
@@ -856,7 +863,7 @@ namespace de.usd.SharpLink
          * @param path  DosDevice path
          * @return prefixed path if prefixing was necessary, the original path otherwise
          */
-        public static string PrepareDevicePath(string path)
+        private static string PrepareDevicePath(string path)
         {
             string prefix = @"Global\GLOBALROOT\RPC CONTROL\";
 
@@ -873,7 +880,7 @@ namespace de.usd.SharpLink
          * @param path  file system path
          * @return prefixed path if prefixing was necessary, the original path otherwise
          */
-        public static string PrepareTargetPath(string path)
+        private static string PrepareTargetPath(string path)
         {
             string prefix = @"\??\";
 
@@ -1191,7 +1198,7 @@ namespace de.usd.SharpLink
          * whether a Junction is open and points to the exepcetd location.
          *
          * @param baseDir  base directory of the Junction
-         * @return target the junction is poiting to
+         * @return target the junction is pointing to
          */
         public static string GetTarget(string baseDir)
         {
@@ -1275,19 +1282,19 @@ namespace de.usd.SharpLink
     public class RegistryLink : ILink
     {
         [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
-        static extern int NtCreateKey(out IntPtr KeyHandle, uint DesiredAccess, [In] OBJECT_ATTRIBUTES ObjectAttributes, int TitleIndex, [In] string Class, int CreateOptions, out int Disposition);
+        static extern uint NtCreateKey(out IntPtr KeyHandle, uint DesiredAccess, [In] OBJECT_ATTRIBUTES ObjectAttributes, int TitleIndex, [In] string Class, int CreateOptions, out int Disposition);
 
         [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
-        static extern int NtSetValueKey(SafeRegistryHandle KeyHandle, UNICODE_STRING ValueName, int TitleIndex, int Type, byte[] Data, int DataSize);
+        static extern uint NtSetValueKey(SafeRegistryHandle KeyHandle, UNICODE_STRING ValueName, int TitleIndex, int Type, byte[] Data, int DataSize);
 
         [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
-        static extern int NtDeleteKey(SafeRegistryHandle KeyHandle);
+        static extern uint NtDeleteKey(SafeRegistryHandle KeyHandle);
 
         [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
         static extern uint NtOpenKeyEx(out IntPtr hObject, uint DesiredAccess, [In] OBJECT_ATTRIBUTES ObjectAttributes, int OpenOptions);
 
         [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
-        static extern int NtQueryValueKey(SafeRegistryHandle KeyHandle, UNICODE_STRING ValueName, uint InformationClass, out KEY_VALUE_INFORMATION ValueInformation, int size, out int sizeRequired);
+        static extern uint NtQueryValueKey(SafeRegistryHandle KeyHandle, UNICODE_STRING ValueName, uint InformationClass, out KEY_VALUE_INFORMATION ValueInformation, int size, out int sizeRequired);
 
         enum KEY_VALUE_INFORMATION_CLASS : uint
         {
@@ -1303,12 +1310,17 @@ namespace de.usd.SharpLink
         private const uint ATTRIBUT_FLAG_OBJ_OPENLINK = 0x00000100;
         private const uint ATTRIBUT_FLAG_CASE_INSENSITIVE = 0x00000040;
 
-        // combines KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_CREATE_LINK and DELETE
+        // combines KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_CREATE_LINK
         private const uint KEY_LINK_ACCESS = 0x0001 | 0x0002 | 0x0020 | 0x00010000;
-        private const int KEY_TYPE_LINK = 0x0000006;
 
+        // combines KEY_QUERY_VALUE and DELETE
+        private const uint KEY_READ_DELETE_ACCESS = 0x0001 | 0x00010000;
+
+        private const int KEY_TYPE_LINK = 0x0000006;
         private const int REG_OPTION_OPEN_LINK = 0x0008;
         private const int REG_OPTION_CREATE_LINK = 0x00000002;
+        private const int REG_CREATED_NEW_KEY = 0x00000001;
+        private const int REG_OPENED_EXISTING_KEY = 0x00000002;
 
         private const string regpath = @"\Registry\";
 
@@ -1320,9 +1332,6 @@ namespace de.usd.SharpLink
 
         // whether the phyiscal registry link was created by this object
         private bool created;
-
-        // whether the RegistryLink was already manually be closed
-        private bool closed;
 
         // whether to keep the registry link open after the RegistryLink instance was cleaned up
         private bool keepAlive;
@@ -1353,7 +1362,6 @@ namespace de.usd.SharpLink
             this.keepAlive = keepAlive;
 
             this.created = false;
-            this.closed = false;
         }
 
         /**
@@ -1362,7 +1370,7 @@ namespace de.usd.SharpLink
          */
         ~RegistryLink()
         {
-            if (!keepAlive && !closed)
+            if (!keepAlive && created)
                 Close();
         }
 
@@ -1399,8 +1407,13 @@ namespace de.usd.SharpLink
          */
         public void Open()
         {
-            created = Open(key, target);
-            closed = false;
+            if (created)
+            {
+                Console.WriteLine("[!] Link {0} was already opened. Close it before calling Open again.", key);
+                return;
+            }
+
+            created = CreateLink(key, target);
         }
 
         /**
@@ -1409,9 +1422,14 @@ namespace de.usd.SharpLink
         public void Close()
         {
             if (created)
-                Close(key, target);
+            {
+                DeleteLink(key, target);
+                created = false;
+                return;
+            }
 
-            closed = true;
+            Console.WriteLine("[!] The current RegistryLink does not hold ownership on {0}", key);
+            Console.WriteLine("[!] Use ForceClose if you really want to close it.");
         }
 
         /**
@@ -1420,19 +1438,19 @@ namespace de.usd.SharpLink
          */
         public void ForceClose()
         {
-            Close(key);
-            closed = true;
+            DeleteKey(key);
+            created = false;
         }
 
         /**
          * Print some information on the RegistryKey. This includes the key name, the path to the
          * target key and whether the physical registry key was created by this object.
          */
-        public void PrintStatus()
+        public void Status()
         {
-            Console.WriteLine("[+] Link Type: Registry key");
+            Console.WriteLine("[+] Link Type: Registry symbolic link");
             Console.WriteLine("[+] \tLink key: {0}", key);
-            Console.WriteLine("[+] \tTarget path: {0}", target);
+            Console.WriteLine("[+] \tTarget key: {0}", target);
             Console.WriteLine("[+] \tCreated: {0}", created);
         }
 
@@ -1469,20 +1487,20 @@ namespace de.usd.SharpLink
         }
 
         /**
-         * Open a registry symbolic link from the specified location to the requested target.
+         * Create a registry symbolic link from the specified location to the requested target.
          * If the key location already exists, the user is requested whether it should be deleted.
          * If the key location is already a symbolic link, the link is left untouched.
          *
-         * @param from  registry key to create the link from
-         * @param to  target for the symbolic link registry key
+         * @param key  registry key to create the link from
+         * @param target  target for the symbolic link registry key
          * @return true if the key was created by this function
          */
-        public static bool Open(string from, string to)
+        public static bool CreateLink(string key, string target)
         {
-            SafeRegistryHandle handle = OpenKey(from);
+            SafeRegistryHandle handle = OpenKey(key);
 
             if (handle == null)
-                handle = CreateKey(from);
+                handle = CreateLink(key);
 
             else
             {
@@ -1490,7 +1508,7 @@ namespace de.usd.SharpLink
 
                 if (linkPath == null)
                 {
-                    Console.Write("[!] Registry key {0} does already exist and is not a symlink. Delete it (y/N)? ", from);
+                    Console.Write("[!] Registry key {0} does already exist and is not a symlink. Delete it (y/N)? ", key);
                     ConsoleKey response = Console.ReadKey(false).Key;
                     Console.WriteLine();
 
@@ -1500,52 +1518,52 @@ namespace de.usd.SharpLink
                         throw new IOException("Cannot continue without deleting the key.");
                     }
 
-                    DeleteKey(handle, from);
+                    DeleteKey(handle, key);
                     handle.Dispose();
-                    handle = CreateKey(from);
+                    handle = CreateLink(key);
                 }
 
                 else
                 {
                     handle.Dispose();
 
-                    if (linkPath == to)
+                    if (linkPath == target)
                     {
-                        Console.WriteLine("[+] Registry link {0} -> {1} alreday exists.", from, to);
+                        Console.WriteLine("[+] Registry link {0} -> {1} alreday exists.", key, target);
                         return false;
                     }
 
-                    Console.WriteLine("[!] Registry symlink already exists but pointing to {0}", linkPath);
+                    Console.WriteLine("[!] Registry symlink already exists but is pointing to {0}", linkPath);
                     Console.WriteLine("[!] They key is treated as open, but may point to an unintended target.");
                     return false;
                 }
             }
 
             UNICODE_STRING value_name = new UNICODE_STRING("SymbolicLinkValue");
-            byte[] data = Encoding.Unicode.GetBytes(to);
+            byte[] data = Encoding.Unicode.GetBytes(target);
 
-            Console.WriteLine("Making registry key {0} a symlink poitning to {1}.", from, to);
-            int status = NtSetValueKey(handle, value_name, 0, KEY_TYPE_LINK, data, data.Length);
+            Console.WriteLine("[+] Assigning symlink property pointing to: {0}", target);
+            uint status = NtSetValueKey(handle, value_name, 0, KEY_TYPE_LINK, data, data.Length);
             handle.Dispose();
 
             if (status != 0)
             {
-                throw new IOException(String.Format("Failure while linking {0} to {1}", from, to));
+                throw new IOException(String.Format("Failure while linking {0} to {1}. NTSTATUS: {2:X}", key, target, status));
             }
 
-            Console.WriteLine("Symlink setup successful!");
+            Console.WriteLine("[+] RegistryLink setup successful!");
             return true;
         }
 
         /**
-         * Close the specified registry key. This function also expects the target of a potential symlink
+         * Delete the specified registry link. This function also expects the target of the link as parameter
          * and compares it with the actual target during the delete process. If the targets do not match, the
-         * key is not closed.
+         * key is not deleted.
          *
          * @param key  registry key to close
          * @param target  expected target of the registry key
          */
-        public static void Close(string key, string target)
+        public static void DeleteLink(string key, string target)
         {
             string linkTarget = GetLinkTarget(key);
 
@@ -1562,16 +1580,15 @@ namespace de.usd.SharpLink
             }
 
             else
-                Close(key);
+                DeleteKey(key);
         }
 
         /**
-         * A simplified version of the Close function that just removes the specified key without further
-         * checks.
+         * Delete the specified registry key.
          *
-         * @param key  registry key to close
+         * @param key  registry key to delete
          */
-        public static void Close(string key)
+        public static void DeleteKey(string key)
         {
             using (SafeRegistryHandle handle = OpenKey(key))
             {
@@ -1581,6 +1598,37 @@ namespace de.usd.SharpLink
                 else
                     DeleteKey(handle, key);
             }
+        }
+
+        /**
+         * Creates the specified key as a regular key within the registry. This function is not used
+         * by SharpLink itself, but can be used by users directly to create subkeys that hold symlinks.
+         * This is useful when you have permissions to create subkeys on a key, but missing permissions
+         * to create links. In this case you can create a subkey where link creation is now allowed since
+         * you are the owner of the corresponding key.
+         *
+         * @param key  registry key to create
+         */
+        public static void CreateKey(string key)
+        {
+            OBJECT_ATTRIBUTES obj_attr = new OBJECT_ATTRIBUTES(RegPathToNative(key), ATTRIBUT_FLAG_CASE_INSENSITIVE);
+            int disposition = 0;
+
+            Console.WriteLine("[+] Creating registry key: {0}", key);
+
+            IntPtr handle;
+            uint status = NtCreateKey(out handle, KEY_LINK_ACCESS, obj_attr, 0, null, 0, out disposition);
+
+            if (status != 0)
+                throw new IOException(String.Format("Failure while creating registry key: {0}. NTSTATUS: {1:X}", key, status));
+
+            if (disposition == REG_CREATED_NEW_KEY)
+                Console.WriteLine("[+] Registry key was successfully created.");
+
+            else if (disposition == REG_OPENED_EXISTING_KEY)
+                Console.WriteLine("[!] Registry did already exist.");
+
+            new SafeRegistryHandle(handle, true).Dispose();
         }
 
         /**
@@ -1616,8 +1664,8 @@ namespace de.usd.SharpLink
                 Data = new byte[0x400]
             };
 
-            int status, length = 0;
-            status = NtQueryValueKey(handle, new UNICODE_STRING("SymbolicLinkValue"), (uint)KEY_VALUE_INFORMATION_CLASS.KeyValuePartialInformation,
+            int length = 0;
+            uint status = NtQueryValueKey(handle, new UNICODE_STRING("SymbolicLinkValue"), (uint)KEY_VALUE_INFORMATION_CLASS.KeyValuePartialInformation,
                                      out record, Marshal.SizeOf(record), out length);
 
             if (status == 0)
@@ -1629,27 +1677,17 @@ namespace de.usd.SharpLink
         /**
          * Delete the specified registry key.
          *
-         * @param handle   handle to the registry key to delete
-         */
-        private static void DeleteKey(SafeRegistryHandle handle)
-        {
-            DeleteKey(handle, "");
-        }
-
-        /**
-         * Delete the specified registry key.
-         *
          * @param handle  handle to the registry key to delete
          * @param display  name of the key
          */
         private static void DeleteKey(SafeRegistryHandle handle, string key)
         {
-            int status = NtDeleteKey(handle);
+            uint status = NtDeleteKey(handle);
 
             if (status != 0)
             {
                 handle.Dispose();
-                throw new IOException(String.Format("Unable to remove registry key {0}", key));
+                throw new IOException(String.Format("Unable to remove registry key: {0}. NTSTATUS: {1:X}", key, status));
             }
 
             Console.WriteLine("[+] Registry key {0} was successfully removed.", key);
@@ -1661,20 +1699,20 @@ namespace de.usd.SharpLink
          * @param path registry key to create
          * @return SafeRegistryHandle for the created key
          */
-        private static SafeRegistryHandle CreateKey(string path)
+        private static SafeRegistryHandle CreateLink(string path)
         {
             OBJECT_ATTRIBUTES obj_attr = new OBJECT_ATTRIBUTES(path, ATTRIBUT_FLAG_CASE_INSENSITIVE);
             int disposition = 0;
 
-            Console.WriteLine("Creating registry key {0}.", path);
+            Console.WriteLine("[+] Creating registry key: {0}", path);
 
             IntPtr handle;
-            int status = NtCreateKey(out handle, KEY_LINK_ACCESS, obj_attr, 0, null, REG_OPTION_CREATE_LINK, out disposition);
+            uint status = NtCreateKey(out handle, KEY_LINK_ACCESS, obj_attr, 0, null, REG_OPTION_CREATE_LINK, out disposition);
 
             if (status == 0)
                 return new SafeRegistryHandle(handle, true);
 
-            throw new IOException("Failure while creating registry key " + path);
+            throw new IOException(String.Format("Failure while creating registry key: {0}. NTSTATUS: {1:X}", path, status));
         }
 
         /**
@@ -1688,7 +1726,7 @@ namespace de.usd.SharpLink
             OBJECT_ATTRIBUTES obj_attr = new OBJECT_ATTRIBUTES(path, ATTRIBUT_FLAG_CASE_INSENSITIVE | ATTRIBUT_FLAG_OBJ_OPENLINK);
 
             IntPtr handle;
-            uint status = NtOpenKeyEx(out handle, KEY_LINK_ACCESS, obj_attr, REG_OPTION_OPEN_LINK);
+            uint status = NtOpenKeyEx(out handle, KEY_READ_DELETE_ACCESS, obj_attr, REG_OPTION_OPEN_LINK);
 
             if (status == 0)
                 return new SafeRegistryHandle(handle, true);
@@ -1696,7 +1734,7 @@ namespace de.usd.SharpLink
             if (status == 0xC0000034)
                 return null;
 
-            throw new IOException("Unable to open registry key " + path);
+            throw new IOException(String.Format("Unable to open registry key: {0}. NTSTATUS: {1:X}", path, status));
         }
 
         /**
