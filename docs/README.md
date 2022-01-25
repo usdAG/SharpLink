@@ -124,11 +124,11 @@ create a new key within the target. Since this key is owned by the invoking user
 usually possible. To make such operations easier, the `RegistryLink` class exports some static functions:
 
 ```csharp
-public static bool CreateLink(string key, string target)     // create the specified registry link manually
-public static void DeleteLink(string key, string target)     // delete the specified registry link manually
-public static void CreateKey(string key)                     // create the specified registry key
-public static void DeleteKey(string key)                     // delete the specified registry key
-public static string GetLinkTarget(string key)               // return the target name of a registry link
+public static bool CreateLink(string key, string target);    // create the specified registry link manually
+public static void DeleteLink(string key, string target);    // delete the specified registry link manually
+public static void CreateKey(string key);                    // create the specified registry key
+public static void DeleteKey(string key);                    // delete the specified registry key
+public static string GetLinkTarget(string key);              // return the target name of a registry link
 ```
 
 Status information on the current link status can be obtained from the `Status()` method:
@@ -252,10 +252,10 @@ Despite it is not recommended to use static functions from the `Junction` class 
 be consumed from *Powershell*. The following functions are available:
 
 ```csharp
-public static Junction Create(string baseDir, string targetDir, bool keepAlive)     // Create a new Junction
-public static void Close(string baseDir, string targetDir)                          // Close an existing Junction
-public static void Close(string baseDir)                                            // Close an existing Junction
-public static string GetTarget(string baseDir)                                      // Get the target path of an existing Junction
+public static Junction Create(string baseDir, string targetDir, bool keepAlive);    // Create a new Junction
+public static void Close(string baseDir, string targetDir);                         // Close an existing Junction
+public static void Close(string baseDir);                                           // Close an existing Junction
+public static string GetTarget(string baseDir);                                     // Get the target path of an existing Junction
 ```
 
 `Junction` objects are treated as resources and perform a cleanup operation when they go out of scope.
@@ -273,10 +273,10 @@ Despite it is not recommended to use static functions from the `DosDevice` class
 be consumed from *Powershell*. The following functions are available:
 
 ```csharp
-public static DosDevice Create(string name, string target, bool keepAlive)    // Create a new DosDevice
-public static void Close(string name, string target)                          // Close an existing DosDevice
-public static void Close(string name)                                         // Close an existing DosDevice
-public static string GetTarget(string name)                                   // Get the target path of an existing DosDevice
+public static DosDevice Create(string name, string target, bool keepAlive);   // Create a new DosDevice
+public static void Close(string name, string target);                         // Close an existing DosDevice
+public static void Close(string name);                                        // Close an existing DosDevice
+public static string GetTarget(string name);                                  // Get the target path of an existing DosDevice
 ```
 
 `DosDevice` objects are treated as resources and perform a cleanup operation when they go out of scope.
