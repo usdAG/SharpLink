@@ -10,6 +10,8 @@ using Microsoft.Win32.SafeHandles;
 namespace de.usd.SharpLink
 {
     /**
+     * SharpLink v1.0.0
+     * 
      * This namespace contains classes that allow low privileged user accounts to create
      * file system and registry symbolic links.
      *
@@ -130,12 +132,27 @@ namespace de.usd.SharpLink
         }
     }
 
+    /**
+     * The ILink interface contains the required methods that classes need to implement to be assignable
+     * to a LinkGroup. Currently, this interface is implemented by the Symlink and RegistryLink types.
+     *
+     * Author: Tobias Neitzel (@qtc_de)
+     */
     public interface ILink
     {
+        // open the underlying link
         void Open();
+
+        // close the underlying link
         void Close();
+
+        // print the current link status to stdout
         void Status();
+
+        // enforce closing the link
         void ForceClose();
+
+        // tell the link whether it should stay alive after the object is cleaned up
         void KeepAlive(bool value);
     }
 
