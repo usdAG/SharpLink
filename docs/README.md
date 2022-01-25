@@ -18,7 +18,7 @@ The *SharpLink namespace* currently contains five classes that are described in 
 An object of type `Symlink` represents a single file system symbolic link and is usually created
 by using one of the two available constructors:
 
-```console
+```powershell
 $s = New-Object de.usd.SharpLink.Symlink("C:\link\path", "C:\target\path")         # Constructor with keepAlive default to false
 $s = New-Object de.usd.SharpLink.Symlink("C:\link\path", "C:\target\path", $true)  # Constructor with explicit keepAlive setting
 ```
@@ -50,7 +50,7 @@ function can be used to enforce closing, even without ownership.
 Apart from using the two constructors mentioned above, it is also possible to create `Symlink` objects by using
 the following statically defined functions:
 
-```console
+```powershell
 $s = [de.usd.SharpLink.Symlink]::FromFile("C:\link\path", "C:\target\path")
 $g = [de.usd.SharpLink.Symlink]::FromFolder("C:\folder\path", "C:\target\path")
 $g = [de.usd.SharpLink.Symlink]::FromFolderToFolder("C:\folder\path", "C:\target\folder\path")
@@ -65,7 +65,7 @@ $g = [de.usd.SharpLink.Symlink]::FromFolderToFolder("C:\folder\path", "C:\target
 
 Status information on the current link status can be obtained from the `Status` method:
 
-```console
+```powershell
 PS C:\> $s = New-Object de.usd.SharpLink.Symlink("C:\Users\Public\Example\link", "C:\ProgramData\target.txt")
 PS C:\> $s.Open()
 [+] Creating Junction: C:\Users\Public\Example -> \RPC CONTROL
@@ -100,7 +100,7 @@ PS C:\> $s.Status()
 An object of type `RegistryLink` represents a single registry link and is usually created
 by using one of the two available constructors:
 
-```console
+```powershell
 $r = New-Object de.usd.SharpLink.RegistryLink("HKCU\LINK", "HKCU\TARGET")         # Constructor with keepAlive defaults to false
 $r = New-Object de.usd.SharpLink.RegistryLink("HKCU\LINK", "HKCU\TARGET", $true)  # Constructor with explicit keepAlive setting
 ```
@@ -133,7 +133,7 @@ public static string GetLinkTarget(string key)               // return the targe
 
 Status information on the current link status can be obtained from the `Status()` method:
 
-```console
+```powershell
 PS C:\> $r = New-Object de.usd.SharpLink.RegistryLink("HKCU\LINK", "HKCU\TARGET")
 PS C:\> $r.Open()
 [+] Creating registry key: \Registry\User\S-1-5-[...]-1001\LINK
@@ -162,7 +162,7 @@ Registry symbolic links are limited in their capabilities by the operating syste
 and trusted (local machine) hives are blocked by the operating system since *Windows 7*. Using *SharpLink*,
 it is possible to confirm this:
 
-```console
+```powershell
 PS C:\> $r = New-Object de.usd.SharpLink.RegistryLink("HKCU\LINK", "HKLM\SOFTWARE\TARGET")
 PS C:\> $r.Open()
 [+] Creating registry key: \Registry\User\S-1-5-[...]-1001\LINK
@@ -175,7 +175,7 @@ ERROR: Access is denied.
 However, it is worth noting that registry symbolic links pointing from a trusted into an untrusted
 hive still work:
 
-```console
+```powershell
 PS C:\> $r = New-Object de.usd.SharpLink.RegistryLink("HKLM\SOFTWARE\TARGET\LINK", "HKCU\Volatile Environment")
 PS C:\> $r.Open()
 [+] Creating registry key: \Registry\Machine\SOFTWARE\TARGET\LINK
@@ -197,7 +197,7 @@ that allows to perform compound operations on them. This is useful when you have
 links at the same time and want to simultaneously open or close them. The following listings shows an
 usage example:
 
-```console
+```powershell
 PS C:\> $g = New-Object de.usd.SharpLink.LinkGroup
 PS C:\> $g.AddSymlink("C:\Users\Public\Example\link", "C:\ProgramData\target.txt")
 PS C:\> $g.AddSymlink("C:\Users\Public\Example\link2", "C:\ProgramData\target2.txt")
