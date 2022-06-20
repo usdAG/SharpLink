@@ -252,16 +252,22 @@ Despite it is not recommended to use static functions from the `Junction` class 
 be consumed from *Powershell*. The following functions are available:
 
 ```csharp
-public static Junction Create(string baseDir, string targetDir, bool keepAlive);    // Create a new Junction
-public static void Close(string baseDir, string targetDir);                         // Close an existing Junction
-public static void Close(string baseDir);                                           // Close an existing Junction
-public static string GetTarget(string baseDir);                                     // Get the target path of an existing Junction
+public static Junction Create(string baseDir, string targetDir);                                // Create a new Junction
+public static Junction Create(string baseDir, string targetDir, bool keepAlive);                // Create a new Junction
+public static Junction Create(string baseDir, string targetDir, bool keepAlive, bool asis);     // Create a new Junction
+public static void Close(string baseDir, string targetDir);                                     // Close an existing Junction
+public static void Close(string baseDir);                                                       // Close an existing Junction
+public static string GetTarget(string baseDir);                                                 // Get the target path of an existing Junction
 ```
 
 `Junction` objects are treated as resources and perform a cleanup operation when they go out of scope.
 This cleanup operation removes the underlying physical Junction. If cleanup is not desired, the `keepAlive`
 property should be set to true during creation. It is also possible to call the `KeepAlive()` function
-on an already existing `Junction`.
+on an already existing `Junction` object.
+
+When creating Junctions by using the static methods listed above, the target directory is automatically
+prefixed with `\??\`, which is required for file system targets. If you want to keep the target directory
+name as specified during the call, you need to set the `asis` parameter to `true` during the creation.
 
 
 ### DosDevice

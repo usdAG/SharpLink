@@ -10,8 +10,8 @@ using Microsoft.Win32.SafeHandles;
 namespace de.usd.SharpLink
 {
     /**
-     * SharpLink v1.0.0
-     * 
+     * SharpLink v1.0.1
+     *
      * This namespace contains classes that allow low privileged user accounts to create
      * file system and registry symbolic links.
      *
@@ -20,7 +20,7 @@ namespace de.usd.SharpLink
      * in the '\RPC Control' object directory. This technique was publicized by James Forshaw
      * and implemented within his symboliclink-testing-tools:
      *
-     *      - https://github.com/googleprojectzero/symboliclink-testing-tools)
+     *      - https://github.com/googleprojectzero/symboliclink-testing-tools
      *
      * We used James's implementation as a reference for the classes implemented in this namespace.
      * Moreover, the C# code for creating the junctions was mostly copied from these resources:
@@ -464,7 +464,7 @@ namespace de.usd.SharpLink
             }
 
             if (junction == null)
-                junction = Junction.Create(linkDir, @"\RPC CONTROL", keepAlive);
+                junction = Junction.Create(linkDir, @"\RPC CONTROL", keepAlive, true);
 
             if (dosDevice == null)
                 dosDevice = DosDevice.Create(linkFile, target, keepAlive);
@@ -876,7 +876,7 @@ namespace de.usd.SharpLink
          * DosDevices created by this class are expected to originate from the RPC Control object directory.
          * This function applies the corresponding prefix to the specified DosDevice path, if required. If
          * the prefix is already used, the path is returned without modification.
-         * 
+         *
          * @param path  DosDevice path
          * @return prefixed path if prefixing was necessary, the original path otherwise
          */
@@ -893,7 +893,7 @@ namespace de.usd.SharpLink
         /**
          * Target file system paths of DosDevices require the '\??\' prefix. This function applies the
          * prefix if not already applied.
-         * 
+         *
          * @param path  file system path
          * @return prefixed path if prefixing was necessary, the original path otherwise
          */
@@ -1037,17 +1037,35 @@ namespace de.usd.SharpLink
         }
 
         /**
+        * Wrapper around the Create function specified further below.
+        */
+        public static Junction Create(string baseDir, string targetDir)
+        {
+            return Create(baseDir, targetDir, false, false);
+        }
+
+        /**
+        * Wrapper around the Create function specified further below.
+        */
+        public static Junction Create(string baseDir, string targetDir, bool keepAlive)
+        {
+            return Create(baseDir, targetDir, keepAlive, false);
+        }
+
+        /**
          * Create a Junction. This function first checks whether a corresponding Junction already
          * exists and uses the DeviceIoControl function to create one if this is not the case.
          * If a Junction was created by this function, it is returned as return value. Otherwise,
-         * null is returned.
+         * null is returned. This is important, as Junction objects are used for resource management.
+         * If called regularly, there can only be one active Junction object per Junction at the time.
          *
          * @param baseDir  directory to create the junction from
          * @param targetDir  directory the junction is pointing to
          * @param keepAlive  whether to keep the Junction alive after object cleanup
+         * @param asis  whether the specified target path should be treated as is (not prefixed by \??\)
          * @return Junction object if a Junction was created, null otherwise
          */
-        public static Junction Create(string baseDir, string targetDir, bool keepAlive)
+        public static Junction Create(string baseDir, string targetDir, bool keepAlive, bool asis)
         {
             bool dirCreated = false;
 
@@ -1061,7 +1079,7 @@ namespace de.usd.SharpLink
 
             if (existingTarget != null)
             {
-                if (existingTarget == targetDir)
+                if (existingTarget == targetDir || (!asis && existingTarget == PrepareTargetPath(targetDir)))
                 {
                     Console.WriteLine("[+] Junction {0} -> {1} does already exist.", baseDir, targetDir);
                     return null;
@@ -1098,22 +1116,29 @@ namespace de.usd.SharpLink
 
             using (SafeFileHandle safeHandle = OpenReparsePoint(baseDir))
             {
-                var targetDirBytes = Encoding.Unicode.GetBytes(targetDir);
+                var printNameBytes = Encoding.Unicode.GetBytes(targetDir);
+                var targetDirBytes = printNameBytes;
+
+                if (!asis)
+                    targetDirBytes = Encoding.Unicode.GetBytes(PrepareTargetPath(targetDir));
+
                 var reparseDataBuffer = new REPARSE_DATA_BUFFER
                 {
                     ReparseTag = IO_REPARSE_TAG_MOUNT_POINT,
-                    ReparseDataLength = (ushort)(targetDirBytes.Length + 12),
+                    ReparseDataLength = (ushort)(printNameBytes.Length + targetDirBytes.Length + 8 + 4),
                     MountPointBuffer = new MOUNT_POINT_REPARSE_BUFFER
                     {
                         SubstituteNameOffset = 0,
                         SubstituteNameLength = (ushort)targetDirBytes.Length,
                         PrintNameOffset = (ushort)(targetDirBytes.Length + 2),
-                        PrintNameLength = 0,
+                        PrintNameLength = (ushort)printNameBytes.Length,
                         PathBuffer = new byte[0x3ff0]
                     }
                 };
 
+                Array.Clear(reparseDataBuffer.MountPointBuffer.PathBuffer, 0, reparseDataBuffer.MountPointBuffer.PathBuffer.Length);
                 Array.Copy(targetDirBytes, reparseDataBuffer.MountPointBuffer.PathBuffer, targetDirBytes.Length);
+                Array.Copy(printNameBytes, 0, reparseDataBuffer.MountPointBuffer.PathBuffer, targetDirBytes.Length + 2, printNameBytes.Length);
 
                 var inBufferSize = Marshal.SizeOf(reparseDataBuffer);
                 var inBuffer = Marshal.AllocHGlobal(inBufferSize);
@@ -1124,7 +1149,7 @@ namespace de.usd.SharpLink
 
                     int bytesReturned;
                     var result = DeviceIoControl(safeHandle.DangerousGetHandle(), FSCTL_SET_REPARSE_POINT,
-                        inBuffer, targetDirBytes.Length + 20, IntPtr.Zero, 0, out bytesReturned, IntPtr.Zero);
+                        inBuffer, printNameBytes.Length + targetDirBytes.Length + 16 + 4, IntPtr.Zero, 0, out bytesReturned, IntPtr.Zero);
 
                     if (!result)
                         throw new IOException("Unable to create Junction.", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
@@ -1157,7 +1182,7 @@ namespace de.usd.SharpLink
                 return;
             }
 
-            else if (target != targetDir)
+            else if (target != targetDir && target != PrepareTargetPath(targetDir))
             {
                 Console.WriteLine("[!] Junction {0} points to {1}", baseDir, target);
                 Console.WriteLine("[!] Treating as closed.");
@@ -1286,6 +1311,23 @@ namespace de.usd.SharpLink
                 throw new IOException("OpenReparsePoint failed!", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
 
             return new SafeFileHandle(handle, true);
+        }
+
+        /**
+         * When the target path of the Junction is a file system path, it requires the '\??\' prefix. This function applies the
+         * prefix if not already applied.
+         *
+         * @param path  file system path
+         * @return prefixed path if prefixing was necessary, the original path otherwise
+         */
+        private static string PrepareTargetPath(string path)
+        {
+            string prefix = @"\??\";
+
+            if (path.StartsWith(prefix))
+                return path;
+
+            return prefix + path;
         }
     }
 
